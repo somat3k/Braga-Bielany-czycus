@@ -1,0 +1,69 @@
+name: QuantRocket Automation
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-build-and-logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-tools
+          python -m pip install --upgrade pip
+          pip install quantrocket-client
+
+      - name: Build/check baseline
+        run: |
+          python --version
+          pip show quantrocket-client
+          redis-cli -h 127.0.0.1 -p 6379 ping
+
+      - name: Persist run logs and state checkpoint
+        run: |
+          mkdir -p artifacts/checkpoints
+          {
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "sha=${GITHUB_SHA}"
+            echo "ref=${GITHUB_REF}"
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee artifacts/run.log
+          redis-cli -h 127.0.0.1 -p 6379 info all > artifacts/redis-info.log
+          cat > artifacts/checkpoints/run-checkpoint.json <<'JSON'
+          {
+            "checkpoint": "quantrocket-automation",
+            "snapshot": "artifacts/redis-info.log",
+            "weights": "external-model-artifacts",
+            "status": "captured"
+          }
+          JSON
+
+      - name: Upload automation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quantrocket-automation-artifacts
+          path: artifacts
