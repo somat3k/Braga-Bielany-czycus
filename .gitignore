@@ -1,0 +1,5 @@
+.DS_Store
+**/bin/
+**/obj/
+**/.dotnet_home/
+e404_mats0/emcep/
