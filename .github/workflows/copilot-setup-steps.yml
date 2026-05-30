@@ -1,0 +1,87 @@
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install infrastructure tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-tools jq
+
+      - name: Install ML and QuantRocket ecosystem packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "quantrocket-client~=2.0" \
+            "numpy~=2.0" \
+            "pandas~=2.2" \
+            "scikit-learn~=1.5" \
+            "xgboost~=2.0" \
+            "tensorflow~=2.16" \
+            "torch~=2.5" \
+            "keras~=3.0" \
+            "h5py~=3.0" \
+            "safetensors~=0.4"
+
+      - name: Verify Docker and Redis runtime
+        run: |
+          docker --version
+          redis-cli -h 127.0.0.1 -p 6379 ping
+          redis-cli -h 127.0.0.1 -p 6379 info memory | tee redis-memory.log
+
+      - name: Log setup resource baseline
+        run: |
+          mkdir -p .copilot/state/checkpoints
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "cpu=$(nproc)"
+            echo "memory_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+            echo "disk=$(df -h / | tail -1 | awk '{print $4}')"
+          } | tee .copilot/state/resource.log
+
+      - name: Save setup checkpoint
+        run: |
+          cat > .copilot/state/checkpoints/setup-checkpoint.json <<'JSON'
+          {
+            "name": "setup-checkpoint",
+            "kind": "copilot-environment",
+            "includes": ["tools", "redis", "python-packages", "resource-baseline"]
+          }
+          JSON
+
+      - name: Upload setup state snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-setup-state
+          path: .copilot/state
