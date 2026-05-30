@@ -13,16 +13,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -39,11 +29,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install "quantrocket-client~=2.0"
 
+      - name: Start Redis via Docker Compose
+        run: |
+          docker compose up -d redis
+          for i in $(seq 1 15); do
+            if redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -q PONG; then
+              echo "Redis is up on localhost:6379"
+              break
+            fi
+            echo "Waiting for Redis... attempt $i/15"
+            sleep 2
+          done
+
       - name: Build/check baseline
         run: |
           python --version
           pip show quantrocket-client
           redis-cli -h 127.0.0.1 -p 6379 ping
+
+      - name: Verify Redis connectivity from within Docker network
+        run: |
+          docker compose exec -T redis \
+            redis-cli -h redis -p 6379 ping
 
       - name: Persist run logs and state checkpoint
         run: |

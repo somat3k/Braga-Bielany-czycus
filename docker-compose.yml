@@ -1,0 +1,47 @@
+version: "3.9"
+
+# QuantRocket stack: Redis + QuantRocket services on a shared Docker network.
+# Redis is exposed on localhost:6379 (host access) and as redis:6379 inside the network.
+# Run:  docker compose up -d
+# Boot: ./boot.sh
+
+networks:
+  quantrocket-net:
+    driver: bridge
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: quantrocket-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - quantrocket-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --save "" --appendonly no
+
+  quantrocket:
+    image: quantrocket/quantrocket:latest
+    container_name: quantrocket
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "1969:1969"
+    networks:
+      - quantrocket-net
+    volumes:
+      - quantrocket-data:/var/lib/quantrocket
+
+volumes:
+  quantrocket-data:
