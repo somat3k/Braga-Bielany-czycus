@@ -5,9 +5,13 @@ on:
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - docker-compose.yml
+      - boot.sh
   pull_request:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - docker-compose.yml
+      - boot.sh
 
 jobs:
   copilot-setup-steps:
@@ -15,16 +19,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -54,11 +48,34 @@ jobs:
             "h5py~=3.0" \
             "safetensors~=0.4"
 
-      - name: Verify Docker and Redis runtime
+      - name: Pull QuantRocket and Redis images
+        run: docker compose pull
+
+      - name: Start Redis and QuantRocket containers
+        run: docker compose up -d redis
+
+      - name: Verify Redis on localhost (host access)
         run: |
-          docker --version
+          for i in $(seq 1 15); do
+            if redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -q PONG; then
+              echo "Redis is up on localhost:6379"
+              break
+            fi
+            echo "Waiting for Redis... attempt $i/15"
+            sleep 2
+          done
           redis-cli -h 127.0.0.1 -p 6379 ping
           redis-cli -h 127.0.0.1 -p 6379 info memory | tee redis-memory.log
+
+      - name: Verify Redis connectivity from within Docker network
+        run: |
+          docker compose exec -T redis \
+            redis-cli -h redis -p 6379 ping
+
+      - name: Verify Docker and stack status
+        run: |
+          docker --version
+          docker compose ps
 
       - name: Log setup resource baseline
         run: |
@@ -76,7 +93,7 @@ jobs:
           {
             "name": "setup-checkpoint",
             "kind": "copilot-environment",
-            "includes": ["tools", "redis", "python-packages", "resource-baseline"]
+            "includes": ["tools", "redis", "docker-compose", "python-packages", "resource-baseline"]
           }
           JSON
 

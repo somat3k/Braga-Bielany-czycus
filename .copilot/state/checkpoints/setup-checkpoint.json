@@ -1,0 +1,5 @@
+{
+  "name": "setup-checkpoint",
+  "kind": "copilot-environment",
+  "includes": ["tools", "redis", "docker-compose", "python-packages", "resource-baseline"]
+}
