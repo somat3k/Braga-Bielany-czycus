@@ -597,21 +597,23 @@ fComputeRatiosAndVolume() =>
     rng = high - low
     body = math.abs(close - open)
 
-    stBodyToRange := fSafeDiv(body, rng, 1e-6)
-    stUpperWick := fSafeDiv(high - math.max(open, close), rng, 1e-6)
-    stLowerWick := fSafeDiv(math.min(open, close) - low, rng, 1e-6)
-    stRangeToAtr := fSafeDiv(rng, ta.atr(inAtrLen), 1e-6)
-    stCloseLocation := fSafeDiv(close - low, rng, 1e-6)
-    stCandleSize := fNormRobust(rng, ta.sma(rng, 50), ta.stdev(rng, 50), inNormClamp)
+    _bodyToRange = fSafeDiv(body, rng, 1e-6)
+    _upperWick = fSafeDiv(high - math.max(open, close), rng, 1e-6)
+    _lowerWick = fSafeDiv(math.min(open, close) - low, rng, 1e-6)
+    _rangeToAtr = fSafeDiv(rng, ta.atr(inAtrLen), 1e-6)
+    _closeLocation = fSafeDiv(close - low, rng, 1e-6)
+    _candleSize = fNormRobust(rng, ta.sma(rng, 50), ta.stdev(rng, 50), inNormClamp)
 
     dir = close >= open ? 1.0 : -1.0
-    eff = stBodyToRange
-    ineff = fClamp(stUpperWick + stLowerWick, 0.0, 1.5)
+    eff = _bodyToRange
+    ineff = fClamp(_upperWick + _lowerWick, 0.0, 1.5)
     volNorm = fNormRobust(volume, ta.sma(volume, 50), ta.stdev(volume, 50), inNormClamp)
 
-    stVolumeConsumed := fClamp((eff * 0.7 + math.abs(stCloseLocation - 0.5) * 0.6) * (volNorm * 0.5 + 0.5), 0.0, 1.5) * dir
-    stVolumeBurned := fClamp((ineff * 0.8 + (1.0 - eff) * 0.5) * (volNorm * 0.5 + 0.5), 0.0, 1.5)
-    stDemandAvailability := fClamp((stCloseLocation * 0.5 + (dir > 0 ? 0.25 : -0.15) + (volNorm * 0.25)), -1.0, 1.0)
+    _volumeConsumed = fClamp((eff * 0.7 + math.abs(_closeLocation - 0.5) * 0.6) * (volNorm * 0.5 + 0.5), 0.0, 1.5) * dir
+    _volumeBurned = fClamp((ineff * 0.8 + (1.0 - eff) * 0.5) * (volNorm * 0.5 + 0.5), 0.0, 1.5)
+    _demandAvailability = fClamp((_closeLocation * 0.5 + (dir > 0 ? 0.25 : -0.15) + (volNorm * 0.25)), -1.0, 1.0)
+
+    [_bodyToRange, _upperWick, _lowerWick, _rangeToAtr, _closeLocation, _candleSize, _volumeConsumed, _volumeBurned, _demandAvailability]
 
 fTfTrend(tf) =>
     request.security(
@@ -1089,7 +1091,7 @@ if isReady
     fProcessExperiences()
 
     // 2) compute feature layers
-    fComputeRatiosAndVolume()
+    [stBodyToRange, stUpperWick, stLowerWick, stRangeToAtr, stCloseLocation, stCandleSize, stVolumeConsumed, stVolumeBurned, stDemandAvailability] := fComputeRatiosAndVolume()
     fComputeIndicators()
     fComputeStructure()
     fUpdateFVGRegistry()
