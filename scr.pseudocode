@@ -1110,6 +1110,7 @@ isReady = bar_index > inWarmupBars
 
 if isReady
     // 1) resolve historical experiences (Q + reliability)
+    // Pine tuples can only be destructured on declaration, so copy tuple outputs into persistent state scalars explicitly.
     [_relTrend, _relMomentum, _relVolatility, _relStructure, _relWave, _relSmc] = fProcessExperiences()
     relTrend := _relTrend
     relMomentum := _relMomentum
