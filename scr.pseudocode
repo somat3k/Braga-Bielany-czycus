@@ -995,7 +995,8 @@ fTableRender() =>
             pe = array.get(arrPivot, r)
             rl = array.get(arrRel, r)
 
-        
+            bg = sc > 0 ? color.new(fColorBull(), 85) : sc < 0 ? color.new(fColorBear(), 85) : color.new(fColorNeutral(), 85)
+
             table.cell(gTable, 0, r + 1, str.tostring(b), bgcolor=bg)
             table.cell(gTable, 1, r + 1, tg, bgcolor=bg)
             table.cell(gTable, 2, r + 1, fRegimeText(rg), bgcolor=bg)
