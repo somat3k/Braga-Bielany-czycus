@@ -777,21 +777,21 @@ fComputeVotes() =>
     sWave  = math.sign(stVoteWave)
     sSmc   = math.sign(stVoteSmc)
 
-    disagree = (sTrend != sMom   ? 1 : 0) +
-      (sTrend != sVol   ? 1 : 0) +
-      (sTrend != sStr   ? 1 : 0) +
-      (sTrend != sWave  ? 1 : 0) +
-      (sTrend != sSmc   ? 1 : 0) +
-      (sMom   != sVol   ? 1 : 0) +
-      (sMom   != sStr   ? 1 : 0) +
-      (sMom   != sWave  ? 1 : 0) +
-      (sMom   != sSmc   ? 1 : 0) +
-      (sVol   != sStr   ? 1 : 0) +
-      (sVol   != sWave  ? 1 : 0) +
-      (sVol   != sSmc   ? 1 : 0) +
-      (sStr   != sWave  ? 1 : 0) +
-      (sStr   != sSmc   ? 1 : 0) +
-      (sWave  != sSmc   ? 1 : 0)
+    disagree = (sTrend != sMom  ? 1 : 0) +
+               (sTrend != sVol  ? 1 : 0) +
+               (sTrend != sStr  ? 1 : 0) +
+               (sTrend != sWave ? 1 : 0) +
+               (sTrend != sSmc  ? 1 : 0) +
+               (sMom   != sVol  ? 1 : 0) +
+               (sMom   != sStr  ? 1 : 0) +
+               (sMom   != sWave ? 1 : 0) +
+               (sMom   != sSmc  ? 1 : 0) +
+               (sVol   != sStr  ? 1 : 0) +
+               (sVol   != sWave ? 1 : 0) +
+               (sVol   != sSmc  ? 1 : 0) +
+               (sStr   != sWave ? 1 : 0) +
+               (sStr   != sSmc  ? 1 : 0) +
+               (sWave  != sSmc  ? 1 : 0)
 
     stConflict := disagree / 15.0
 
