@@ -208,6 +208,9 @@ fRiskText(r) =>
 fRegimeText(r) =>
     r == REGIME_TREND ? "TREND" : r == REGIME_RANGE ? "RANGE" : r == REGIME_VOLATILE ? "VOL" : "TRANS"
 
+fConflictColor(cx) =>
+    na(cx) ? color.white : cx > CONFLICT_HIGH ? fColorBear() : cx > CONFLICT_MED ? color.yellow : fColorBull()
+
 // ----------------------------------------------------------------------------
 // [D] Generic array push helpers
 // ----------------------------------------------------------------------------
@@ -767,16 +770,22 @@ fComputeVotes() =>
     // consensus / conflict
     stConsensus := math.abs((stVoteTrend + stVoteMomentum + stVoteVolatility + stVoteStructure + stVoteWave + stVoteSmc) / 6.0)
 
-    disagree = (math.sign(stVoteTrend) != math.sign(stVoteMomentum) ? 1 : 0) +
-      (math.sign(stVoteTrend) != math.sign(stVoteStructure) ? 1 : 0) +
-      (math.sign(stVoteTrend) != math.sign(stVoteWave) ? 1 : 0) +
-      (math.sign(stVoteTrend) != math.sign(stVoteSmc) ? 1 : 0) +
-      (math.sign(stVoteMomentum) != math.sign(stVoteStructure) ? 1 : 0) +
-      (math.sign(stVoteMomentum) != math.sign(stVoteWave) ? 1 : 0) +
-      (math.sign(stVoteMomentum) != math.sign(stVoteSmc) ? 1 : 0) +
-      (math.sign(stVoteStructure) != math.sign(stVoteWave) ? 1 : 0) +
-      (math.sign(stVoteStructure) != math.sign(stVoteSmc) ? 1 : 0) +
-      (math.sign(stVoteWave) != math.sign(stVoteSmc) ? 1 : 0)
+    sTrend = math.sign(stVoteTrend)
+    sMom   = math.sign(stVoteMomentum)
+    sStr   = math.sign(stVoteStructure)
+    sWave  = math.sign(stVoteWave)
+    sSmc   = math.sign(stVoteSmc)
+
+    disagree = (sTrend != sMom   ? 1 : 0) +
+      (sTrend != sStr   ? 1 : 0) +
+      (sTrend != sWave  ? 1 : 0) +
+      (sTrend != sSmc   ? 1 : 0) +
+      (sMom   != sStr   ? 1 : 0) +
+      (sMom   != sWave  ? 1 : 0) +
+      (sMom   != sSmc   ? 1 : 0) +
+      (sStr   != sWave  ? 1 : 0) +
+      (sStr   != sSmc   ? 1 : 0) +
+      (sWave  != sSmc   ? 1 : 0)
 
     stConflict := disagree / 10.0
 
@@ -1010,7 +1019,7 @@ fTableRender() =>
             bg = sc > 0 ? color.new(fColorBull(), 85) : sc < 0 ? color.new(fColorBear(), 85) : color.new(fColorNeutral(), 85)
             sigTxt = sg == SIG_LONG ? fColorBull() : sg == SIG_SHORT ? fColorBear() : color.white
             scTxt  = sc > 0 ? fColorBull() : sc < 0 ? fColorBear() : color.white
-            cxTxt  = na(cx) ? color.white : cx > CONFLICT_HIGH ? fColorBear() : cx > CONFLICT_MED ? color.yellow : fColorBull()
+            cxTxt  = fConflictColor(cx)
 
             table.cell(gTable, 0, r + 1, str.tostring(b), text_color=color.white, bgcolor=bg)
             table.cell(gTable, 1, r + 1, tg, text_color=color.white, bgcolor=bg)
