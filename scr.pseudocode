@@ -1,0 +1,1450 @@
+//@version=6
+indicator("Pinacle Master Scaffold v6 • Session 4", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=300)
+
+// ============================================================
+// Constants
+// ============================================================
+
+MODE_ONE_ONLY        = "ONE_ONLY"
+MODE_MULTI_ENSEMBLE  = "MULTI_ENSEMBLE"
+MODE_WEIGHTED        = "WEIGHTED_ENSEMBLE"
+
+SIG_LONG  = 1
+SIG_SHORT = -1
+SIG_WAIT  = 0
+
+REGIME_TREND      = 1
+REGIME_RANGE      = 2
+REGIME_VOLATILE   = 3
+REGIME_TRANSITION = 4
+
+RISK_LOW  = 1
+RISK_MED  = 2
+RISK_HIGH = 3
+
+FVG_NONE    = 0
+FVG_FRESH   = 1
+FVG_PARTIAL = 2
+FVG_FILLED  = 3
+FVG_INVALID = 4
+
+// ============================================================
+// Inputs
+// ============================================================
+
+g0="Engine"
+inMode=input.string(MODE_WEIGHTED,"Strategy Mode",options=[MODE_ONE_ONLY,MODE_MULTI,MODE_WEIGHTED],group=g0)
+inWarm=input.int(300,"Warmup",50,3000,group=g0)
+
+// Timeframe
+g01TF = "Timeframe Alignment"
+inTfFast = input.timeframe("15", "Fast TF", group=gTF)
+inTfBase = input.timeframe("60", "Base TF", group=gTF)
+inTfSlow = input.timeframe("240", "Slow TF", group=gTF)
+inTfWFast = input.float(0.25, "Weight Fast", step=0.01, group=gTF)
+inTfWBase = input.float(0.35, "Weight Base", step=0.01, group=gTF)
+inTfWSlow = input.float(0.40, "Weight Slow", step=0.01, group=gTF)
+
+g1="Risk Policy"
+inAtrLen=input.int(14,"ATR Len",5,100,group=g1)
+inConflictNoTrade=input.float(0.75,"Conflict No-Trade Threshold",0,1,0.01,group=g1)
+inRiskStopATR=input.float(1.5,"Stop ATR Mult",0.2,10,0.1,group=g1)
+inRiskTakeATR=input.float(2.2,"Take ATR Mult",0.2,20,0.1,group=g1)
+
+// Normalization
+g02Norm = "Normalization"
+inAtrLen = input.int(14, "ATR Length", minval=5, maxval=100, group=gNorm)
+inStdLen = input.int(20, "Stdev Length", minval=5, maxval=200, group=gNorm)
+inNormClamp = input.float(2.5, "Clamp", step=0.1, minval=0.5, maxval=8.0, group=gNorm)
+
+g2="Reliability Governance"
+inRelEnable=input.bool(true,"Enable Reliability",group=g2)
+inRelAlpha=input.float(0.10,"Update Alpha",0.01,1,0.01,group=g2)
+inRelDecay=input.float(0.002,"Per-bar Decay",0,0.2,0.001,group=g2)
+inRelMinSamples=input.int(20,"Min Samples To Trust",1,2000,group=g2)
+inRelMinFactor=input.float(0.6,"Min Weight Factor",0.1,2,0.05,group=g2)
+inRelMaxFactor=input.float(1.6,"Max Weight Factor",1,5,0.05,group=g2)
+
+// Regime
+g03Reg = "Regime"
+inTrendThreshold = input.float(0.42, "Trend Threshold", step=0.01, group=gReg)
+inRangeAtrThreshold = input.float(0.55, "Range ATR Threshold", step=0.01, group=gReg)
+inVolAtrThreshold = input.float(1.35, "Volatile ATR Threshold", step=0.01, group=gReg)
+inRegimeHoldBars = input.int(4, "Regime Hold Bars", minval=1, maxval=20, group=gReg)
+
+g3="FVG Registry"
+inFvgEnable=input.bool(true,"Enable Multi-FVG",group=g3)
+inFvgMax=input.int(30,"Max FVG",4,120,group=g3)
+inFvgLife=input.int(250,"Life Bars",10,5000,group=g3)
+inFvgMergeOverlap=input.float(0.35,"Merge Overlap Min",0,1,0.01,group=g3)
+inDrawFvgBoxes=input.bool(true,"Draw Active FVG Boxes",group=g3)
+
+// Trend
+g04Trend = "Trend"
+inEnableMAPack = input.bool(true, "Enable MA Pack", group=gTrend)
+inEnableVIDYA = input.bool(true, "Enable VIDYA", group=gTrend)
+inEnableVWAP = input.bool(true, "Enable VWAP", group=gTrend)
+inEnableBlackCross = input.bool(true, "Enable Black Cross", group=gTrend)
+inEnableWhiteCross = input.bool(true, "Enable White Cross", group=gTrend)
+inCrossFastLen = input.int(20, "Cross Fast EMA", minval=2, maxval=200, group=gTrend)
+inCrossSlowLen = input.int(50, "Cross Slow EMA", minval=3, maxval=400, group=gTrend)
+inVidyaLen = input.int(20, "VIDYA Length", minval=2, maxval=200, group=gTrend)
+inVidyaCmoLen = input.int(9, "VIDYA CMO Length", minval=2, maxval=100, group=gTrend)
+
+g4="Pivot Events"
+inPivotL=input.int(3,"Pivot Left",1,20,group=g4)
+inPivotR=input.int(3,"Pivot Right",1,20,group=g4)
+inPivotRows=input.int(8,"Pivot Rows",2,30,group=g4)
+inShowPivotAnchors=input.bool(true,"Show Pivot Anchors",group=g4)
+
+// Momentum
+g05Mom = "Momentum"
+inEnableMACD = input.bool(true, "Enable MACD", group=gMom)
+inEnableRSI = input.bool(true, "Enable RSI", group=gMom)
+inEnableCycles = input.bool(true, "Enable Cycle Module", group=gMom)
+inCycleLen = input.int(34, "Cycle EMA Length", minval=5, maxval=200, group=gMom)
+
+g5="Weights"
+wTrend=input.float(1.0,"wTrend",0,10,0.05,group=g5)
+wMom=input.float(1.0,"wMomentum",0,10,0.05,group=g5)
+wVol=input.float(1.0,"wVolatility",0,10,0.05,group=g5)
+wStruct=input.float(1.2,"wStructure",0,10,0.05,group=g5)
+wWave=input.float(0.9,"wWave",0,10,0.05,group=g5)
+wSmc=input.float(1.3,"wSMC",0,10,0.05,group=g5)
+wQ=input.float(0.8,"wAdaptiveQ",0,10,0.05,group=g5)
+inLongTh=input.float(0.65,"Long Th",0,1,0.01,group=g5)
+inShortTh=input.float(-0.65,"Short Th",-1,0,0.01,group=g5)
+
+// Structure SMC/FVG
+g06Struct = "Structure (SMC/FVG)"
+inEnableBOS = input.bool(true, "Enable BOS", group=gStruct)
+inEnableCHOCH = input.bool(true, "Enable CHOCH", group=gStruct)
+inEnableOB = input.bool(true, "Enable Order Block Proxy", group=gStruct)
+inEnableLiquidity = input.bool(true, "Enable Liquidity Sweep", group=gStruct)
+inEnableFVG = input.bool(true, "Enable FVG Tracking", group=gStruct)
+inPivotLeft = input.int(3, "Pivot Left", minval=1, maxval=20, group=gStruct)
+inPivotRight = input.int(3, "Pivot Right", minval=1, maxval=20, group=gStruct)
+inFvgMaxLife = input.int(120, "FVG Max Life Bars", minval=10, maxval=1000, group=gStruct)
+
+g6="Display"
+inRows=input.int(14,"Main Table Rows",6,40,group=g6)
+inDrawBudget=input.int(250,"Draw Budget",50,500,group=g6)
+inShowDebug=input.bool(false,"Debug",group=g6)
+
+// Wave/Fibo
+gWave = "Wave/Fibonacci"
+inEnableWaveImpulse = input.bool(true, "Enable Wave Impulse", group=gWave)
+inEnableWaveCorrective = input.bool(true, "Enable Wave Corrective", group=gWave)
+inEnableWaveTriangle = input.bool(true, "Enable Wave Triangle", group=gWave)
+inEnableFibo = input.bool(true, "Enable Fibo Confluence", group=gWave)
+
+// Decision
+gDecision = "Decision"
+inEnableDecisionTree = input.bool(true, "Enable Decision Tree", group=gDecision)
+inEnableAdaptiveQ = input.bool(true, "Enable Adaptive Q", group=gDecision)
+inRewardHorizon = input.int(5, "Reward Horizon Bars", minval=2, maxval=50, group=gDecision)
+inQLearningRate = input.float(0.08, "Q Learning Rate", step=0.01, minval=0.01, maxval=1.0, group=gDecision)
+inQDiscount = input.float(0.0, "Q Discount", step=0.05, minval=0.0, maxval=0.99, group=gDecision)
+
+// Scoring
+gScore = "Scoring"
+inWTrend = input.float(1.00, "Weight Trend", step=0.05, group=gScore)
+inWMomentum = input.float(1.00, "Weight Momentum", step=0.05, group=gScore)
+inWVolatility = input.float(1.00, "Weight Volatility", step=0.05, group=gScore)
+inWStructure = input.float(1.20, "Weight Structure", step=0.05, group=gScore)
+inWWave = input.float(0.90, "Weight Wave", step=0.05, group=gScore)
+inWSmc = input.float(1.30, "Weight SMC", step=0.05, group=gScore)
+inWAdaptiveQ = input.float(0.80, "Weight Adaptive Q", step=0.05, group=gScore)
+inConflictPenalty = input.float(0.15, "Conflict Penalty", step=0.01, minval=0.0, maxval=1.0, group=gScore)
+inLongThreshold = input.float(0.65, "Long Threshold", step=0.01, group=gScore)
+inShortThreshold = input.float(-0.65, "Short Threshold", step=0.01, group=gScore)
+
+// Visual / Table
+gVisual = "Visual/Table"
+inShowVisual = input.bool(true, "Enable Visual Markers", group=gVisual)
+inShowDebug = input.bool(false, "Enable Debug Labels", group=gVisual)
+inTableRows = input.int(18, "Pivot Table Rows", minval=6, maxval=40, group=gVisual)
+inDrawBudget = input.int(240, "Draw Budget", minval=50, maxval=450, group=gVisual)
+inTheme = input.string("Nebula", "Theme", options=["Nebula", "Monochrome Pro", "SMC Tactical", "Aurora"], group=gVisual)
+inLineStyleSignal = input.string("Solid", "Signal Line Style", options=["Solid", "Dashed", "Dotted"], group=gVisual)
+inLineThin = input.int(1, "Line Thin", minval=1, maxval=4, group=gVisual)
+inLineNormal = input.int(2, "Line Normal", minval=1, maxval=6, group=gVisual)
+inLineBold = input.int(3, "Line Bold", minval=1, maxval=8, group=gVisual)
+inAlphaStrong = input.int(10, "Alpha Strong", minval=0, maxval=90, group=gVisual)
+inAlphaMedium = input.int(35, "Alpha Medium", minval=0, maxval=95, group=gVisual)
+inAlphaSoft = input.int(65, "Alpha Soft", minval=0, maxval=99, group=gVisual)
+
+// -----------------------------
+// [A] NEW INPUTS
+// -----------------------------
+groupS5 = "Session 5 Extensions"
+inEnableMultiFVG = input.bool(true, "Enable Multi-FVG Registry", group=groupS5)
+inMaxFVG = input.int(24, "Max Active/Tracked FVG", minval=4, maxval=100, group=groupS5)
+inFVGBoxLife = input.int(220, "FVG Box Max Life Bars", minval=20, maxval=2000, group=groupS5)
+
+inEnablePivotEventRows = input.bool(true, "Enable Pivot Event Rows", group=groupS5)
+inPivotEventRows = input.int(8, "Pivot Event Rows", minval=2, maxval=25, group=groupS5)
+
+inEnablePivotAnchors = input.bool(true, "Enable Pivot Anchors", group=groupS5)
+inEnableFVGBoxes = input.bool(true, "Enable FVG Boxes", group=groupS5)
+
+inEnableReliability = input.bool(true, "Enable Strategy Reliability Tracker", group=groupS5)
+inRelLookback = input.int(120, "Reliability Lookback", minval=20, maxval=2000, group=groupS5)
+inRelAlpha = input.float(0.12, "Reliability Update Alpha", minval=0.01, maxval=1.0, step=0.01, group=groupS5)
+inRelMinWeightFactor = input.float(0.60, "Reliability Min Weight Factor", minval=0.1, maxval=1.0, step=0.05, group=groupS5)
+inRelMaxWeightFactor = input.float(1.60, "Reliability Max Weight Factor", minval=1.0, maxval=3.0, step=0.05, group=groupS5)
+
+// ---------- Reliability state ----------
+var float relTrend=0.5, relMom=0.5, relVol=0.5, relStruct=0.5, relWave=0.5, relSmc=0.5
+var int nTrend=0, nMom=0, nVol=0, nStruct=0, nWave=0, nSmc=0
+
+fRelFactor(rel, n)=>
+    trust = n >= inRelMinSamples ? 1.0 : fSafeDiv(n, inRelMinSamples, 1e-6)
+    raw = inRelMinFactor + (inRelMaxFactor-inRelMinFactor)*rel
+    1.0 + (raw-1.0)*trust
+
+fRelDecay() =>
+    if inRelEnable
+        relTrend := fClamp(relTrend*(1.0-inRelDecay),0,1)
+        relMom := fClamp(relMom*(1.0-inRelDecay),0,1)
+        relVol := fClamp(relVol*(1.0-inRelDecay),0,1)
+        relStruct := fClamp(relStruct*(1.0-inRelDecay),0,1)
+        relWave := fClamp(relWave*(1.0-inRelDecay),0,1)
+        relSmc := fClamp(relSmc*(1.0-inRelDecay),0,1)
+
+// ============================================================
+// Utility
+// ============================================================
+
+fClamp(v, lo, hi) => math.max(lo, math.min(hi, v))
+fSafeDiv(a, b, eps) => a / (math.abs(b) < eps ? eps : b)
+fNorm(v, scale) => fClamp(fSafeDiv(v, scale, 1e-6), -1.0, 1.0)
+fNormRobust(v, center, spread, clampN) =>
+    z = fSafeDiv(v - center, spread, 1e-6)
+    fClamp(z / clampN, -1.0, 1.0)
+
+fLineStyle(s) => s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+fColorBull() =>
+    inTheme == "Nebula" ? color.rgb(0, 255, 170) :
+     inTheme == "Monochrome Pro" ? color.rgb(220, 220, 220) :
+     inTheme == "SMC Tactical" ? color.rgb(80, 220, 120) : color.rgb(60, 255, 200)
+fColorBear() =>
+    inTheme == "Nebula" ? color.rgb(255, 90, 180) :
+     inTheme == "Monochrome Pro" ? color.rgb(120, 120, 120) :
+     inTheme == "SMC Tactical" ? color.rgb(255, 110, 110) : color.rgb(255, 120, 70)
+fColorNeutral() =>
+    inTheme == "Nebula" ? color.rgb(130, 150, 255) :
+     inTheme == "Monochrome Pro" ? color.rgb(180, 180, 180) :
+     inTheme == "SMC Tactical" ? color.rgb(180, 200, 120) : color.rgb(140, 170, 255)
+
+fSignalText(s) => s == SIG_LONG ? "LONG" : s == SIG_SHORT ? "SHORT" : "WAIT"
+fRiskText(r) => r == RISK_LOW ? "LOW" : r == RISK_MED ? "MED" : "HIGH"
+fRegimeText(r) => r == REGIME_TREND ? "TREND" : r == REGIME_RANGE ? "RANGE" : r == REGIME_VOLATILE ? "VOL" : "TRANS"
+
+fPushInt(arr, v, n) =>
+    array.unshift(arr, v)
+    if array.size(arr) > n
+        array.pop(arr)
+fPushFloat(arr, v, n) =>
+    array.unshift(arr, v)
+    if array.size(arr) > n
+        array.pop(arr)
+fPushString(arr, v, n) =>
+    array.unshift(arr, v)
+    if array.size(arr) > n
+        array.pop(arr)
+
+// ============================================================
+// State
+// ============================================================
+
+// Ratios
+var float stBodyToRange = na
+var float stRangeToAtr = na
+var float stUpperWick = na
+var float stLowerWick = na
+var float stCloseLocation = na
+var float stCandleSize = na
+
+// Volume/Demand proxies
+var float stVolumeConsumed = na
+var float stVolumeBurned = na
+var float stDemandAvailability = na
+
+// Indicators
+var float stMacdScore = na
+var float stRsiScore = na
+var float stVwapScore = na
+var float stMaScore = na
+var float stVidya = na
+var float stVidyaScore = na
+var float stCycleScore = na
+var float stCyclePhase = na
+var float stMtfTrend = na
+var float stMtfMomentum = na
+var int stCrossSignal = 0
+
+// Structure
+var bool stBos = false
+var bool stChoch = false
+var bool stLiqSweep = false
+var bool stObTouch = false
+var float stHtfBias = na
+
+// Pivot memory for stricter BOS/CHOCH
+var float stLastPivotHigh = na
+var float stPrevPivotHigh = na
+var float stLastPivotLow = na
+var float stPrevPivotLow = na
+var int stStructureDir = 0 // +1 bullish, -1 bearish, 0 unknown
+
+// FVG tracked object
+var bool stFvgActive = false
+var bool stFvgBull = true
+var float stFvgTop = na
+var float stFvgBottom = na
+var int stFvgBirthBar = na
+var int stFvgState = FVG_NONE
+var float stFvgFillRatio = 0.0
+var float stFvgProximity = 0.0
+
+// Wave/Fibo
+var float stImpulseProb = na
+var float stCorrectiveProb = na
+var float stTriangleProb = na
+var float stFiboConf = na
+
+// Votes
+var float stVoteTrend = na
+var float stVoteMomentum = na
+var float stVoteVolatility = na
+var float stVoteStructure = na
+var float stVoteWave = na
+var float stVoteSmc = na
+
+// Decision
+var int stRegime = REGIME_TRANSITION
+var int stRegimePending = REGIME_TRANSITION
+var int stRegimeHold = 0
+var float stRuleScore = 0.0
+var float stQScore = 0.0
+var float stEnsemble = 0.0
+var float stConsensus = 0.0
+var float stConflict = 0.0
+var float stFinalScore = 0.0
+var float stConfidence = 0.0
+var int stSignal = SIG_WAIT
+var int stRisk = RISK_HIGH
+var string stReason = "NA"
+var string stTopModule = "NA"
+var string stBucket = "NA"
+var string stTag = "NA"
+
+// Adaptive Q storage
+var qKeys = array.new_string()
+var qVals = array.new_float()
+
+fQGet(key) =>
+    idx = array.indexof(qKeys, key)
+    idx >= 0 ? array.get(qVals, idx) : 0.0
+fQSet(key, val) =>
+    idx = array.indexof(qKeys, key)
+    if idx >= 0
+        array.set(qVals, idx, val)
+    else
+        array.push(qKeys, key)
+        array.push(qVals, val)
+fStateBucket(regime, trendScore, volScore, htfBias) =>
+    t = trendScore > 0.4 ? 2 : trendScore < -0.4 ? 0 : 1
+    v = volScore > 0.4 ? 2 : volScore < -0.4 ? 0 : 1
+    h = htfBias > 0.3 ? 2 : htfBias < -0.3 ? 0 : 1
+    "R" + str.tostring(regime) + "_T" + str.tostring(t) + "_V" + str.tostring(v) + "_H" + str.tostring(h)
+fQSigned(bucket) =>
+    qL = fQGet(bucket + "|L")
+    qS = fQGet(bucket + "|S")
+    qW = fQGet(bucket + "|W")
+    best = math.max(qL, math.max(qS, qW))
+    best == qL ? qL : best == qS ? -qS : 0.0
+
+// delayed experiences
+var expBar = array.new_int()
+var expBucket = array.new_string()
+var expAction = array.new_string()
+var expEntry = array.new_float()
+
+fPushExp(bi, bucket, action, entry) =>
+    array.push(expBar, bi)
+    array.push(expBucket, bucket)
+    array.push(expAction, action)
+    array.push(expEntry, entry)
+
+fProcessExp() =>
+    i = array.size(expBar) - 1
+    while i >= 0
+        b0 = array.get(expBar, i)
+        if bar_index - b0 >= inRewardHorizon
+            bucket = array.get(expBucket, i)
+            action = array.get(expAction, i)
+            entry = array.get(expEntry, i)
+            atr = ta.atr(inAtrLen)
+            rawRet = fSafeDiv(close - entry, atr, 1e-6)
+            rewardSigned = action == "L" ? rawRet : action == "S" ? -rawRet : -math.abs(rawRet) * 0.1
+            reward = fClamp(rewardSigned, -1.0, 1.0)
+
+            key = bucket + "|" + action
+            oldQ = fQGet(key)
+            nextBest = math.max(fQGet(bucket + "|L"), math.max(fQGet(bucket + "|S"), fQGet(bucket + "|W")))
+            newQ = oldQ + inQLearningRate * (reward + inQDiscount * nextBest - oldQ)
+            fQSet(key, fClamp(newQ, -1.0, 1.0))
+
+            array.remove(expBar, i)
+            array.remove(expBucket, i)
+            array.remove(expAction, i)
+            array.remove(expEntry, i)
+        i -= 1
+
+// draw lifecycle
+var line[] gLines = array.new_line()
+var label[] gLabels = array.new_label()
+fPruneDraw() =>
+    while array.size(gLines) > inDrawBudget
+        ln = array.pop(gLines)
+        line.delete(ln)
+    while array.size(gLabels) > inDrawBudget
+        lb = array.pop(gLabels)
+        label.delete(lb)
+
+// Table data
+var arrBar = array.new_int()
+var arrRegime = array.new_int()
+var arrScore = array.new_float()
+var arrConf = array.new_float()
+var arrSig = array.new_int()
+var arrRisk = array.new_int()
+var arrTag = array.new_string()
+var arrReason = array.new_string()
+var arrTop = array.new_string()
+var arrBody = array.new_float()
+var arrRatr = array.new_float()
+var arrCandle = array.new_float()
+var arrVolCon = array.new_float()
+var arrVolBurn = array.new_float()
+var arrDemand = array.new_float()
+var arrFvgState = array.new_int()
+var arrFvgFill = array.new_float()
+
+var table gTable = table.new(position.top_right, 16, inTableRows + 1, border_width=1)
+
+
+// ---------- Q state ----------
+var qKeys=array.new_string(), qVals=array.new_float()
+fQGet(k)=>idx=array.indexof(qKeys,k), idx>=0?array.get(qVals,idx):0.0
+fQSet(k,v)=>idx=array.indexof(qKeys,k), idx>=0?array.set(qVals,idx,v):(array.push(qKeys,k),array.push(qVals,v))
+
+var expBar=array.new_int(), expBucket=array.new_string(), expAction=array.new_string(), expEntry=array.new_float(), expModule=array.new_string()
+fPushExp(b,bk,a,e,m)=>array.push(expBar,b),array.push(expBucket,bk),array.push(expAction,a),array.push(expEntry,e),array.push(expModule,m)
+
+// ---------- FVG registry ----------
+var fvgTop=array.new_float(), fvgBot=array.new_float(), fvgBull=array.new_bool(), fvgBirth=array.new_int(), fvgState=array.new_int(), fvgFill=array.new_float(), fvgBox=array.new_box()
+var archTop=array.new_float(), archBot=array.new_float(), archState=array.new_int(), archBirth=array.new_int()
+
+fFvgOverlap(t1,b1,t2,b2)=>
+    interTop=math.min(t1,t2), interBot=math.max(b1,b2)
+    inter=math.max(interTop-interBot,0)
+    base=math.max(math.max(t1-b1,t2-b2),syminfo.mintick)
+    fSafeDiv(inter,base,1e-6)
+
+fAddFvg(top,bot,bullish,birth)=>
+    if array.size(fvgTop)>=inFvgMax
+        array.shift(fvgTop),array.shift(fvgBot),array.shift(fvgBull),array.shift(fvgBirth),array.shift(fvgState),array.shift(fvgFill)
+        bx=array.shift(fvgBox)
+        if not na(bx)
+            box.delete(bx)
+    // merge with overlapping same-direction fresh/partial zones
+    merged=false
+    for i=0 to array.size(fvgTop)-1
+        st=array.get(fvgState,i)
+        if (st==FVG_FRESH or st==FVG_PARTIAL) and array.get(fvgBull,i)==bullish
+            ov=fFvgOverlap(top,bot,array.get(fvgTop,i),array.get(fvgBot,i))
+            if ov>=inFvgMergeOverlap
+                nt=math.max(top,array.get(fvgTop,i))
+                nb=math.min(bot,array.get(fvgBot,i))
+                array.set(fvgTop,i,nt),array.set(fvgBot,i,nb),array.set(fvgBirth,i,math.min(birth,array.get(fvgBirth,i)))
+                merged:=true
+    if not merged
+        array.push(fvgTop,top),array.push(fvgBot,bot),array.push(fvgBull,bullish),array.push(fvgBirth,birth),array.push(fvgState,FVG_FRESH),array.push(fvgFill,0.0),array.push(fvgBox,na)
+
+fArchiveFvg(i)=>
+    array.push(archTop,array.get(fvgTop,i)), array.push(archBot,array.get(fvgBot,i)), array.push(archState,array.get(fvgState,i)), array.push(archBirth,array.get(fvgBirth,i))
+    bx=array.get(fvgBox,i)
+    if not na(bx)
+        box.delete(bx)
+
+fUpdateFvg() =>
+    if inFvgEnable
+        nb=low>high[2], ns=high<low[2]
+        if nb
+            fAddFvg(low,high[2],true,bar_index)
+        if ns
+            fAddFvg(low[2],high,false,bar_index)
+    i=array.size(fvgTop)-1
+    while i>=0
+        t=array.get(fvgTop,i), b=array.get(fvgBot,i), bullz=array.get(fvgBull,i), birth=array.get(fvgBirth,i), fill=array.get(fvgFill,i), st=array.get(fvgState,i)
+        size=math.max(t-b,syminfo.mintick)
+        touched=low<=t and high>=b
+        fm=bullz?(t-math.max(low,b)):(math.min(high,t)-b)
+        fr=fClamp(fSafeDiv(fm,size,1e-6),0,1.2)
+        fill:=math.max(fill,fr)
+        expired=(bar_index-birth)>inFvgLife
+        invalid=bullz?close<b:close>t
+        filled=fill>=0.95
+        st:=invalid?FVG_INVALID:filled?FVG_FILLED:touched?FVG_PARTIAL:FVG_FRESH
+        array.set(fvgFill,i,fill),array.set(fvgState,i,st)
+        if inDrawFvgBoxes
+            bx=array.get(fvgBox,i)
+            c=st==FVG_FRESH?color.new(neut,82):st==FVG_PARTIAL?color.new(bull,84):st==FVG_FILLED?color.new(color.gray,88):color.new(bear,82)
+            if na(bx)
+                nbx=box.new(birth,t,bar_index,b,xloc=xloc.bar_index,bgcolor=c,border_color=color.new(c,0))
+                array.set(fvgBox,i,nbx)
+            else
+                box.set_right(bx,bar_index),box.set_top(bx,t),box.set_bottom(bx,b),box.set_bgcolor(bx,c),box.set_border_color(bx,color.new(c,0))
+        if expired or st==FVG_INVALID or st==FVG_FILLED
+            fArchiveFvg(i)
+            array.remove(fvgTop,i),array.remove(fvgBot,i),array.remove(fvgBull,i),array.remove(fvgBirth,i),array.remove(fvgState,i),array.remove(fvgFill,i),array.remove(fvgBox,i)
+        i-=1
+
+fFvgAgg() =>
+    cnt=array.size(fvgTop), total=0.0, proxBest=0.0
+    if cnt==0
+        [0.0,0.0]
+    else
+        atr=ta.atr(inAtrLen)
+        for i=0 to cnt-1
+            t=array.get(fvgTop,i), b=array.get(fvgBot,i), st=array.get(fvgState,i)
+            mid=(t+b)*0.5
+            prox=fClamp(1.0-fSafeDiv(math.abs(close-mid),atr,1e-6),0,1)
+            proxBest:=math.max(proxBest,prox)
+            s=st==FVG_FRESH?0.22:st==FVG_PARTIAL?0.10:st==FVG_FILLED?-0.06:-0.20
+            total += s*(0.5+0.5*prox)
+        [total/cnt, proxBest]
+
+// ---------- Pivot events ----------
+var pivBar=array.new_int(), pivType=array.new_string(), pivPrice=array.new_float(), pivDir=array.new_int(), pivLine=array.new_line()
+fAddPivEvent(b,t,p,d)=>
+    array.unshift(pivBar,b),array.unshift(pivType,t),array.unshift(pivPrice,p),array.unshift(pivDir,d)
+    if array.size(pivBar)>inPivotRows
+        array.pop(pivBar),array.pop(pivType),array.pop(pivPrice),array.pop(pivDir)
+
+fAnchor(b,p,d)=>
+    if inShowPivotAnchors
+        c=d>0?color.new(bull,25):d<0?color.new(bear,25):color.new(neut,35)
+        ln=line.new(b,p,bar_index,p,xloc=xloc.bar_index,color=c,width=1,style=line.style_dotted)
+        array.unshift(pivLine,ln)
+        if array.size(pivLine)>inDrawBudget
+            old=array.pop(pivLine)
+            line.delete(old)
+
+// ---------- Core feature proxies ----------
+atr=ta.atr(inAtrLen)
+rng=high-low
+body=math.abs(close-open)
+bodyR=fSafeDiv(body,rng,1e-6)
+rangeAtr=fSafeDiv(rng,atr,1e-6)
+
+ema20=ta.ema(close,20), ema50=ta.ema(close,50), ema200=ta.ema(close,200)
+trendScore=fClamp(((ema20-ema50)+(ema50-ema200))/math.max(atr,syminfo.mintick),-1,1)
+
+macd=(ta.ema(close,12)-ta.ema(close,26)) - ta.ema(ta.ema(close,12)-ta.ema(close,26),9)
+momScore=fClamp(macd/math.max(atr,syminfo.mintick),-1,1)
+volScore=fClamp(rangeAtr-1,-1,1)
+
+// simple wave/smc proxies
+waveScore=fClamp((0.5-math.abs(bodyR-0.6)),-1,1)
+smcBias=fClamp((ema50-ema200)/math.max(atr,syminfo.mintick),-1,1)
+
+// structure via pivots
+ph=ta.pivothigh(high,inPivotL,inPivotR)
+pl=ta.pivotlow(low,inPivotL,inPivotR)
+var float lastPH=na, prevPH=na, lastPL=na, prevPL=na
+var int structDir=0
+if not na(ph)
+    prevPH:=lastPH, lastPH:=ph
+    fAddPivEvent(bar_index-inPivotR,"PH",ph,1), fAnchor(bar_index-inPivotR,ph,1)
+if not na(pl)
+    prevPL:=lastPL, lastPL:=pl
+    fAddPivEvent(bar_index-inPivotR,"PL",pl,-1), fAnchor(bar_index-inPivotR,pl,-1)
+
+bullStruct=not na(lastPH) and not na(prevPH) and lastPH>prevPH
+bearStruct=not na(lastPL) and not na(prevPL) and lastPL<prevPL
+prevDir=structDir
+structDir:=bullStruct?1:bearStruct?-1:nz(structDir[1],0)
+
+bos=(structDir==1 and not na(lastPH) and close>lastPH) or (structDir==-1 and not na(lastPL) and close<lastPL)
+choch=(prevDir==-1 and structDir==1 and not na(lastPH) and close>lastPH) or (prevDir==1 and structDir==-1 and not na(lastPL) and close<lastPL)
+
+if bos
+    p=structDir>0?lastPH:lastPL
+    fAddPivEvent(bar_index,"BOS",p,structDir), fAnchor(bar_index,p,structDir)
+if choch
+    p=structDir>0?lastPH:lastPL
+    fAddPivEvent(bar_index,"CHOCH",p,structDir), fAnchor(bar_index,p,structDir)
+
+structureScore=(bos?0.35:0)+(choch?-0.30:0)+smcBias*0.6
+
+fUpdateFvg()
+[fvgScore, fvgProx] = fFvgAgg()
+smcScore = structureScore + fvgScore
+
+// ---------- Consensus/conflict ----------
+votes=array.from(trendScore,momScore,volScore,structureScore,waveScore,smcScore)
+sum=0.0
+for i=0 to array.size(votes)-1
+    sum += array.get(votes,i)
+consensus=math.abs(sum/array.size(votes))
+dis=(math.sign(trendScore)!=math.sign(momScore)?1:0)+(math.sign(trendScore)!=math.sign(structureScore)?1:0)+(math.sign(momScore)!=math.sign(structureScore)?1:0)+(math.sign(waveScore)!=math.sign(smcScore)?1:0)
+conflict=dis/4.0
+
+// top module
+absMax=0.0
+top="Trend"
+mods=array.from("Trend","Momentum","Volatility","Structure","Wave","SMC")
+for i=0 to array.size(votes)-1
+    v=math.abs(array.get(votes,i))
+    if v>absMax
+        absMax:=v
+        top:=array.get(mods,i)
+
+// reliability-decay per bar
+fRelDecay()
+
+// dynamic weighted score
+wfTrend=wTrend*(inRelEnable?fRelFactor(relTrend,nTrend):1)
+wfMom=wMom*(inRelEnable?fRelFactor(relMom,nMom):1)
+wfVol=wVol*(inRelEnable?fRelFactor(relVol,nVol):1)
+wfStruct=wStruct*(inRelEnable?fRelFactor(relStruct,nStruct):1)
+wfWave=wWave*(inRelEnable?fRelFactor(relWave,nWave):1)
+wfSmc=wSmc*(inRelEnable?fRelFactor(relSmc,nSmc):1)
+wNum=wfTrend*trendScore+wfMom*momScore+wfVol*volScore+wfStruct*structureScore+wfWave*waveScore+wfSmc*smcScore
+wDen=wfTrend+wfMom+wfVol+wfStruct+wfWave+wfSmc
+weighted=fSafeDiv(wNum,wDen,1e-6)
+multi=(trendScore+momScore+volScore+structureScore+waveScore+smcScore)/6.0
+one=top=="Trend"?trendScore:top=="Momentum"?momScore:top=="Volatility"?volScore:top=="Structure"?structureScore:top=="Wave"?waveScore:smcScore
+
+// policy by mode
+modeScore = inMode==MODE_ONE_ONLY ? one : inMode==MODE_MULTI ? multi : weighted
+
+// MULTI veto policy: if high conflict + opposing structure, neutralize
+if inMode==MODE_MULTI and conflict>0.70 and math.abs(structureScore)>0.5 and math.sign(multi)!=math.sign(structureScore)
+    modeScore:=0.0
+
+// adaptive Q
+bucket="B"+str.tostring(structDir)+"_"+str.tostring(math.round(trendScore*10))+"_"+str.tostring(math.round(volScore*10))
+qL=fQGet(bucket+"|L"), qS=fQGet(bucket+"|S"), qW=fQGet(bucket+"|W")
+qBest=math.max(qL,math.max(qS,qW))
+qSigned=qBest==qL?qL:qBest==qS?-qS:0.0
+
+finalRaw = 0.55*modeScore + 0.30*structureScore + 0.15*wQ*qSigned - conflict*0.15
+final=fClamp(finalRaw,-1,1)
+conf=fClamp(math.abs(final)*(0.5+0.5*consensus),0,1)
+
+// risk circuit breaker
+noTrade = conflict >= inConflictNoTrade
+sig = noTrade ? SIG_WAIT : final>=inLongTh?SIG_LONG:final<=inShortTh?SIG_SHORT:SIG_WAIT
+risk = conf>0.75 and math.abs(volScore)<0.6 ? "LOW" : conf>0.55 ? "MED" : "HIGH"
+
+// Experience push and process
+if bar_index>inWarm and sig!=SIG_WAIT
+    act=sig==SIG_LONG?"L":"S"
+    fPushExp(bar_index,bucket,act,close,top)
+
+i=array.size(expBar)-1
+while i>=0
+    b0=array.get(expBar,i)
+    if bar_index-b0>=5
+        bk=array.get(expBucket,i), act=array.get(expAction,i), en=array.get(expEntry,i), mod=array.get(expModule,i)
+        r=fSafeDiv(close-en,atr,1e-6)
+        reward=fClamp(act=="L"?r:act=="S"?-r:-math.abs(r)*0.1,-1,1)
+        key=bk+"|"+act
+        old=fQGet(key)
+        nxt=math.max(fQGet(bk+"|L"),math.max(fQGet(bk+"|S"),fQGet(bk+"|W")))
+        fQSet(key,fClamp(old+0.08*(reward+0.0*nxt-old),-1,1))
+        hit=reward>0?1.0:0.0
+        if inRelEnable
+            if mod=="Trend"
+                relTrend:=fClamp(relTrend+inRelAlpha*(hit-relTrend),0,1), nTrend+=1
+            else if mod=="Momentum"
+                relMom:=fClamp(relMom+inRelAlpha*(hit-relMom),0,1), nMom+=1
+            else if mod=="Volatility"
+                relVol:=fClamp(relVol+inRelAlpha*(hit-relVol),0,1), nVol+=1
+            else if mod=="Structure"
+                relStruct:=fClamp(relStruct+inRelAlpha*(hit-relStruct),0,1), nStruct+=1
+            else if mod=="Wave"
+                relWave:=fClamp(relWave+inRelAlpha*(hit-relWave),0,1), nWave+=1
+            else
+                relSmc:=fClamp(relSmc+inRelAlpha*(hit-relSmc),0,1), nSmc+=1
+        array.remove(expBar,i),array.remove(expBucket,i),array.remove(expAction,i),array.remove(expEntry,i),array.remove(expModule,i)
+    i-=1
+
+// -----------------------------
+// [B] STATE: MULTI-FVG REGISTRY
+// -----------------------------
+// Parallel arrays for FVG registry
+var fvgTopArr = array.new_float()
+var fvgBotArr = array.new_float()
+var fvgBullArr = array.new_bool()
+var fvgBirthArr = array.new_int()
+var fvgStateArr = array.new_int()    // FVG_FRESH/PARTIAL/FILLED/INVALID
+var fvgFillArr = array.new_float()
+var fvgBoxArr = array.new_box()
+
+// Helper: create FVG record
+fAddFVG(_top, _bot, _bull, _birthBar) =>
+    if array.size(fvgTopArr) >= inMaxFVG
+        // drop oldest
+        array.shift(fvgTopArr)
+        array.shift(fvgBotArr)
+        array.shift(fvgBullArr)
+        array.shift(fvgBirthArr)
+        array.shift(fvgStateArr)
+        array.shift(fvgFillArr)
+        oldBox = array.shift(fvgBoxArr)
+        if not na(oldBox)
+            box.delete(oldBox)
+
+    array.push(fvgTopArr, _top)
+    array.push(fvgBotArr, _bot)
+    array.push(fvgBullArr, _bull)
+    array.push(fvgBirthArr, _birthBar)
+    array.push(fvgStateArr, FVG_FRESH)
+    array.push(fvgFillArr, 0.0)
+    array.push(fvgBoxArr, na)
+
+// Update lifecycle for all FVGs
+fUpdateFVGRegistry() =>
+    if not inEnableMultiFVG or not inEnableFVG
+        // clear optional draw boxes if disabled
+        for i = 0 to array.size(fvgBoxArr) - 1
+            bx = array.get(fvgBoxArr, i)
+            if not na(bx)
+                box.delete(bx)
+        array.clear(fvgBoxArr)
+    else
+        // 1) detect new FVG each bar and append
+        newBull = low > high[2]
+        newBear = high < low[2]
+        if newBull
+            fAddFVG(low, high[2], true, bar_index)
+        if newBear
+            fAddFVG(low[2], high, false, bar_index)
+
+        // 2) update each record
+        for i = 0 to array.size(fvgTopArr) - 1
+            top = array.get(fvgTopArr, i)
+            bot = array.get(fvgBotArr, i)
+            bull = array.get(fvgBullArr, i)
+            birth = array.get(fvgBirthArr, i)
+            state = array.get(fvgStateArr, i)
+            fill = array.get(fvgFillArr, i)
+            bx = array.get(fvgBoxArr, i)
+
+            zone = math.max(top - bot, syminfo.mintick)
+            touched = low <= top and high >= bot
+
+            fillMeasure = bull ? (top - math.max(low, bot)) : (math.min(high, top) - bot)
+            fr = fClamp(fSafeDiv(fillMeasure, zone, 1e-6), 0.0, 1.2)
+            fill := math.max(fill, fr)
+
+            expired = (bar_index - birth) > inFVGBoxLife
+            invalid = bull ? close < bot : close > top
+            filled = fill >= 0.95
+
+            state := invalid ? FVG_INVALID : filled ? FVG_FILLED : touched ? FVG_PARTIAL : FVG_FRESH
+
+            // write back
+            array.set(fvgFillArr, i, fill)
+            array.set(fvgStateArr, i, state)
+
+            // draw / update box
+            if inEnableFVGBoxes and inShowVisual
+                c = state == FVG_FRESH ? color.new(fColorNeutral(), 82) :
+                    state == FVG_PARTIAL ? color.new(fColorBull(), 84) :
+                    state == FVG_FILLED ? color.new(color.gray, 88) :
+                    color.new(fColorBear(), 82)
+
+                if na(bx)
+                    nb = box.new(left=birth, top=top, right=bar_index, bottom=bot, xloc=xloc.bar_index, bgcolor=c, border_color=color.new(c, 0))
+                    array.set(fvgBoxArr, i, nb)
+                else
+                    box.set_right(bx, bar_index)
+                    box.set_top(bx, top)
+                    box.set_bottom(bx, bot)
+                    box.set_bgcolor(bx, c)
+                    box.set_border_color(bx, color.new(c, 0))
+
+            // clean expired hard
+            if expired
+                if not na(bx)
+                    box.delete(bx)
+                // mark as invalid and dim
+                array.set(fvgStateArr, i, FVG_INVALID)
+
+// Aggregate registry into current bar structure votes
+fFVGRegistryAggregateScore() =>
+    total = 0.0
+    proxBest = 0.0
+    cnt = array.size(fvgTopArr)
+    if cnt == 0
+        [0.0, 0.0]
+    else
+        for i = 0 to cnt - 1
+            top = array.get(fvgTopArr, i)
+            bot = array.get(fvgBotArr, i)
+            state = array.get(fvgStateArr, i)
+            mid = (top + bot) * 0.5
+            prox = fClamp(1.0 - fSafeDiv(math.abs(close - mid), ta.atr(inAtrLen), 1e-6), 0.0, 1.0)
+            proxBest := math.max(proxBest, prox)
+
+            s = state == FVG_FRESH ? 0.22 : state == FVG_PARTIAL ? 0.10 : state == FVG_FILLED ? -0.06 : -0.20
+            total += s * (0.5 + 0.5 * prox)
+        [total / cnt, proxBest]
+
+
+// -----------------------------
+// [C] MULTI-PIVOT EVENT ROWS + ANCHORS
+// -----------------------------
+var pivEventBarArr = array.new_int()
+var pivEventTypeArr = array.new_string() // PH, PL, BOS, CHOCH
+var pivEventPriceArr = array.new_float()
+var pivEventDirArr = array.new_int()     // +1 / -1 / 0
+var pivAnchorLineArr = array.new_line()
+
+fAddPivotEvent(_bar, _type, _price, _dir) =>
+    maxRows = inPivotEventRows
+    array.unshift(pivEventBarArr, _bar)
+    array.unshift(pivEventTypeArr, _type)
+    array.unshift(pivEventPriceArr, _price)
+    array.unshift(pivEventDirArr, _dir)
+    if array.size(pivEventBarArr) > maxRows
+        array.pop(pivEventBarArr)
+        array.pop(pivEventTypeArr)
+        array.pop(pivEventPriceArr)
+        array.pop(pivEventDirArr)
+
+fDrawPivotAnchor(_bar, _price, _dir) =>
+    if inEnablePivotAnchors and inShowVisual
+        col = _dir > 0 ? color.new(fColorBull(), 25) : _dir < 0 ? color.new(fColorBear(), 25) : color.new(fColorNeutral(), 35)
+        ln = line.new(_bar, _price, bar_index, _price, xloc=xloc.bar_index, extend=extend.none, color=col, width=inLineThin, style=line.style_dotted)
+        array.unshift(pivAnchorLineArr, ln)
+        if array.size(pivAnchorLineArr) > inDrawBudget
+            old = array.pop(pivAnchorLineArr)
+            line.delete(old)
+
+fCapturePivotEvents(_ph, _pl, _bos, _choch, _lastPH, _lastPL, _dir) =>
+    if inEnablePivotEventRows
+        if not na(_ph)
+            fAddPivotEvent(bar_index - inPivotRight, "PH", _ph, +1)
+            fDrawPivotAnchor(bar_index - inPivotRight, _ph, +1)
+        if not na(_pl)
+            fAddPivotEvent(bar_index - inPivotRight, "PL", _pl, -1)
+            fDrawPivotAnchor(bar_index - inPivotRight, _pl, -1)
+        if _bos
+            pr = _dir > 0 ? _lastPH : _lastPL
+            fAddPivotEvent(bar_index, "BOS", pr, _dir)
+            fDrawPivotAnchor(bar_index, pr, _dir)
+        if _choch
+            pr = _dir > 0 ? _lastPH : _lastPL
+            fAddPivotEvent(bar_index, "CHOCH", pr, _dir)
+            fDrawPivotAnchor(bar_index, pr, _dir)
+
+
+// -----------------------------
+// [D] RELIABILITY TRACKER
+// -----------------------------
+// rolling reliability per strategy bucket
+var float relTrend = 0.50
+var float relMomentum = 0.50
+var float relVolatility = 0.50
+var float relStructure = 0.50
+var float relWave = 0.50
+var float relSmc = 0.50
+
+// experience arrays extended: dominant module at decision time
+var expModule = array.new_string()
+
+fPushExpWithModule(_bar, _bucket, _action, _entry, _module) =>
+    array.push(expBar, _bar)
+    array.push(expBucket, _bucket)
+    array.push(expAction, _action)
+    array.push(expEntry, _entry)
+    array.push(expModule, _module)
+
+fUpdateRel(oldRel, hit) =>
+    // hit in [0,1]
+    oldRel + inRelAlpha * (hit - oldRel)
+
+fProcessExpReliability() =>
+    i = array.size(expBar) - 1
+    while i >= 0
+        b0 = array.get(expBar, i)
+        if bar_index - b0 >= inRewardHorizon
+            bucket = array.get(expBucket, i)
+            action = array.get(expAction, i)
+            entry = array.get(expEntry, i)
+            module = array.get(expModule, i)
+
+            atr = ta.atr(inAtrLen)
+            r = fSafeDiv(close - entry, atr, 1e-6)
+            rewardSigned = action == "L" ? r : action == "S" ? -r : -math.abs(r) * 0.1
+            reward = fClamp(rewardSigned, -1.0, 1.0)
+
+            // Q update
+            key = bucket + "|" + action
+            oldQ = fQGet(key)
+            nextBest = math.max(fQGet(bucket + "|L"), math.max(fQGet(bucket + "|S"), fQGet(bucket + "|W")))
+            newQ = oldQ + inQLearningRate * (reward + inQDiscount * nextBest - oldQ)
+            fQSet(key, fClamp(newQ, -1.0, 1.0))
+
+            // reliability update (hit proxy)
+            hit = reward > 0 ? 1.0 : 0.0
+            if inEnableReliability
+                if module == "Trend"
+                    relTrend := fUpdateRel(relTrend, hit)
+                else if module == "Momentum"
+                    relMomentum := fUpdateRel(relMomentum, hit)
+                else if module == "Volatility"
+                    relVolatility := fUpdateRel(relVolatility, hit)
+                else if module == "Structure"
+                    relStructure := fUpdateRel(relStructure, hit)
+                else if module == "Wave"
+                    relWave := fUpdateRel(relWave, hit)
+                else if module == "SMC"
+                    relSmc := fUpdateRel(relSmc, hit)
+
+            // remove exp row
+            array.remove(expBar, i)
+            array.remove(expBucket, i)
+            array.remove(expAction, i)
+            array.remove(expEntry, i)
+            array.remove(expModule, i)
+        i -= 1
+
+fRelFactor(rel) =>
+    // map reliability [0,1] -> factor [min,max]
+    inRelMinWeightFactor + (inRelMaxWeightFactor - inRelMinWeightFactor) * rel
+
+
+// ============================================================
+// Modules
+// ============================================================
+
+fComputeRatiosAndVolume() =>
+    rng = high - low
+    body = math.abs(close - open)
+
+    stBodyToRange := fSafeDiv(body, rng, 1e-6)
+    stUpperWick := fSafeDiv(high - math.max(open, close), rng, 1e-6)
+    stLowerWick := fSafeDiv(math.min(open, close) - low, rng, 1e-6)
+    stRangeToAtr := fSafeDiv(rng, ta.atr(inAtrLen), 1e-6)
+    stCloseLocation := fSafeDiv(close - low, rng, 1e-6)
+    stCandleSize := fNormRobust(rng, ta.sma(rng, 50), ta.stdev(rng, 50), inNormClamp)
+
+    // Volume consumed vs burned proxy:
+    // consumed = directional accepted volume
+    // burned = inefficiency volume (high wick+counter pressure)
+    dir = close >= open ? 1.0 : -1.0
+    eff = stBodyToRange
+    ineff = fClamp(stUpperWick + stLowerWick, 0.0, 1.5)
+    volNorm = fNormRobust(volume, ta.sma(volume, 50), ta.stdev(volume, 50), inNormClamp)
+
+    stVolumeConsumed := fClamp((eff * 0.7 + math.abs(stCloseLocation - 0.5) * 0.6) * (volNorm * 0.5 + 0.5), 0.0, 1.5) * dir
+    stVolumeBurned := fClamp((ineff * 0.8 + (1.0 - eff) * 0.5) * (volNorm * 0.5 + 0.5), 0.0, 1.5)
+
+    // Demand availability proxy: distance from lower range + relative participation + bullish acceptance
+    stDemandAvailability := fClamp((stCloseLocation * 0.5 + (dir > 0 ? 0.25 : -0.15) + (volNorm * 0.25)), -1.0, 1.0)
+
+fTfTrend(tf) =>
+    request.security(syminfo.tickerid, tf,
+      fNormRobust((ta.ema(close, 20) - ta.ema(close, 50)) + (ta.ema(close, 50) - ta.ema(close, 200)), 0.0, ta.atr(inAtrLen), inNormClamp),
+      barmerge.gaps_off, barmerge.lookahead_off)
+
+fTfMom(tf) =>
+    request.security(syminfo.tickerid, tf,
+      fNormRobust(ta.rsi(close, 14), 50.0, 20.0, inNormClamp),
+      barmerge.gaps_off, barmerge.lookahead_off)
+
+// Real VIDYA (CMO-adaptive)
+fVidya(src, len, cmoLen) =>
+    cmo = ta.cmo(src, cmoLen)
+    alpha = (2.0 / (len + 1.0)) * math.abs(cmo) / 100.0
+    var float v = na
+    v := na(v[1]) ? src : v[1] + alpha * (src - v[1])
+    v
+
+fComputeIndicators() =>
+    atr = ta.atr(inAtrLen)
+    std = ta.stdev(close, inStdLen)
+
+    // MACD/RSI/VWAP/MA
+    macdLine = ta.ema(close, 12) - ta.ema(close, 26)
+    macdSig = ta.ema(macdLine, 9)
+    macdHist = macdLine - macdSig
+    stMacdScore := inEnableMACD ? fNormRobust(macdHist, 0.0, atr, inNormClamp) : 0.0
+    stRsiScore := inEnableRSI ? fNormRobust(ta.rsi(close, 14), 50.0, 20.0, inNormClamp) : 0.0
+    stVwapScore := inEnableVWAP ? fNormRobust(close - ta.vwap(hlc3), 0.0, atr, inNormClamp) : 0.0
+
+    ema20 = ta.ema(close, 20)
+    ema50 = ta.ema(close, 50)
+    ema200 = ta.ema(close, 200)
+    stMaScore := inEnableMAPack ? fNormRobust((ema20 - ema50) + (ema50 - ema200), 0.0, atr, inNormClamp) : 0.0
+
+    // Real VIDYA
+    stVidya := inEnableVIDYA ? fVidya(close, inVidyaLen, inVidyaCmoLen) : na
+    stVidyaScore := inEnableVIDYA ? fNormRobust(ta.change(stVidya), 0.0, std, inNormClamp) : 0.0
+
+    // Cycle module
+    detrended = close - ta.ema(close, inCycleLen)
+    stCycleScore := inEnableCycles ? fNormRobust(detrended, 0.0, atr, inNormClamp) : 0.0
+    stCyclePhase := inEnableCycles ? fNormRobust(ta.change(detrended), 0.0, std, inNormClamp) : 0.0
+
+    // Crosses
+    crossFast = ta.ema(close, inCrossFastLen)
+    crossSlow = ta.ema(close, inCrossSlowLen)
+    isWhite = inEnableWhiteCross and ta.crossover(crossFast, crossSlow)
+    isBlack = inEnableBlackCross and ta.crossunder(crossFast, crossSlow)
+    stCrossSignal := isWhite ? 1 : isBlack ? -1 : 0
+
+    // MTF multiplex
+    den = inTfWFast + inTfWBase + inTfWSlow
+    trF = fTfTrend(inTfFast)
+    trB = fTfTrend(inTfBase)
+    trS = fTfTrend(inTfSlow)
+    moF = fTfMom(inTfFast)
+    moB = fTfMom(inTfBase)
+    moS = fTfMom(inTfSlow)
+    stMtfTrend := fSafeDiv(trF * inTfWFast + trB * inTfWBase + trS * inTfWSlow, den, 1e-6)
+    stMtfMomentum := fSafeDiv(moF * inTfWFast + moB * inTfWBase + moS * inTfWSlow, den, 1e-6)
+
+// Stricter BOS/CHOCH + persistent FVG tracking
+fComputeStructure() =>
+    ph = ta.pivothigh(high, inPivotLeft, inPivotRight)
+    pl = ta.pivotlow(low, inPivotLeft, inPivotRight)
+
+    if not na(ph)
+        stPrevPivotHigh := stLastPivotHigh
+        stLastPivotHigh := ph
+    if not na(pl)
+        stPrevPivotLow := stLastPivotLow
+        stLastPivotLow := pl
+
+    // structure dir by pivot progression
+    bullStruct = not na(stLastPivotHigh) and not na(stPrevPivotHigh) and stLastPivotHigh > stPrevPivotHigh
+    bearStruct = not na(stLastPivotLow) and not na(stPrevPivotLow) and stLastPivotLow < stPrevPivotLow
+    prevDir = stStructureDir
+    stStructureDir := bullStruct ? 1 : bearStruct ? -1 : nz(stStructureDir[1], 0)
+
+    // BOS: break of latest opposite pivot with current directional structure
+    bosBull = inEnableBOS and stStructureDir == 1 and not na(stLastPivotHigh) and close > stLastPivotHigh
+    bosBear = inEnableBOS and stStructureDir == -1 and not na(stLastPivotLow) and close < stLastPivotLow
+    stBos := bosBull or bosBear
+
+    // CHOCH: directional flip with pivot break
+    chochBull = inEnableCHOCH and prevDir == -1 and stStructureDir == 1 and not na(stLastPivotHigh) and close > stLastPivotHigh
+    chochBear = inEnableCHOCH and prevDir == 1 and stStructureDir == -1 and not na(stLastPivotLow) and close < stLastPivotLow
+    stChoch := chochBull or chochBear
+
+    stLiqSweep := inEnableLiquidity and ((high > ta.highest(high[1], 20) and close < high) or (low < ta.lowest(low[1], 20) and close > low))
+    stObTouch := inEnableOB and (math.abs(close - ta.sma(close, 50)) < ta.atr(inAtrLen) * 0.25)
+    stHtfBias := fNorm((ta.ema(close, 50) - ta.ema(close, 200)) / ta.atr(inAtrLen), 1.0)
+
+    // FVG tracking: one active zone (extendable later to array registry)
+    if inEnableFVG
+        newBull = low > high[2]
+        newBear = high < low[2]
+
+        if (not stFvgActive) and (newBull or newBear)
+            stFvgActive := true
+            stFvgBull := newBull
+            stFvgTop := newBull ? low : low[2]
+            stFvgBottom := newBull ? high[2] : high
+            stFvgBirthBar := bar_index
+            stFvgState := FVG_FRESH
+            stFvgFillRatio := 0.0
+        else if stFvgActive
+            zoneSize = math.max(stFvgTop - stFvgBottom, syminfo.mintick)
+            touched = (low <= stFvgTop and high >= stFvgBottom)
+            fillMeasure = stFvgBull ? (stFvgTop - math.max(low, stFvgBottom)) : (math.min(high, stFvgTop) - stFvgBottom)
+            fillRatio = fClamp(fSafeDiv(fillMeasure, zoneSize, 1e-6), 0.0, 1.2)
+            stFvgFillRatio := math.max(stFvgFillRatio, fillRatio)
+
+            expired = (bar_index - stFvgBirthBar) > inFvgMaxLife
+            invalid = stFvgBull ? close < stFvgBottom : close > stFvgTop
+            filled = stFvgFillRatio >= 0.95
+
+            stFvgState := invalid ? FVG_INVALID : filled ? FVG_FILLED : touched ? FVG_PARTIAL : FVG_FRESH
+
+            if expired or invalid or filled
+                stFvgActive := false
+
+        refPrice = stFvgActive ? (stFvgTop + stFvgBottom) * 0.5 : close
+        stFvgProximity := fClamp(1.0 - fSafeDiv(math.abs(close - refPrice), ta.atr(inAtrLen), 1e-6), 0.0, 1.0)
+    else
+        stFvgActive := false
+        stFvgState := FVG_NONE
+        stFvgFillRatio := 0.0
+        stFvgProximity := 0.0
+
+fComputeWave() =>
+    stImpulseProb := inEnableWaveImpulse ? fClamp(stMtfTrend * 0.5 + stMacdScore * 0.5 + 0.5, 0.0, 1.0) : 0.0
+    stCorrectiveProb := inEnableWaveCorrective ? fClamp(1.0 - stImpulseProb, 0.0, 1.0) : 0.0
+    stTriangleProb := inEnableWaveTriangle ? fClamp(0.5 - math.abs(stMtfTrend) * 0.4, 0.0, 1.0) : 0.0
+    stFiboConf := inEnableFibo ? fClamp(1.0 - math.abs(stCloseLocation - 0.618), 0.0, 1.0) : 0.0
+
+fClassifyRegime() =>
+    raw = math.abs(stMtfTrend) > inTrendThreshold and stRangeToAtr > 0.8 ? REGIME_TREND :
+      stRangeToAtr < inRangeAtrThreshold ? REGIME_RANGE :
+      stRangeToAtr > inVolAtrThreshold ? REGIME_VOLATILE : REGIME_TRANSITION
+
+    if raw != stRegime
+        if raw != stRegimePending
+            stRegimePending := raw
+            stRegimeHold := 1
+        else
+            stRegimeHold += 1
+            if stRegimeHold >= inRegimeHoldBars
+                stRegime := raw
+                stRegimeHold := 0
+    else
+        stRegimePending := stRegime
+        stRegimeHold := 0
+
+fComputeVotes() =>
+    crossBoost = stCrossSignal == 1 ? 0.20 : stCrossSignal == -1 ? -0.20 : 0.0
+
+    stVoteTrend := (stMaScore + stVidyaScore + stVwapScore + stMtfTrend + crossBoost) / 5.0
+    stVoteMomentum := (stMacdScore + stRsiScore + stMtfMomentum + stCycleScore * 0.5 + stCyclePhase * 0.5) / 4.0
+    stVoteVolatility := fNorm(stRangeToAtr - 1.0, 1.0)
+
+    fvgScore = stFvgState == FVG_FRESH ? 0.30 : stFvgState == FVG_PARTIAL ? 0.12 : stFvgState == FVG_FILLED ? -0.10 : stFvgState == FVG_INVALID ? -0.30 : 0.0
+    stVoteStructure := (stBos ? 0.35 : 0.0) + (stChoch ? -0.30 : 0.0) + (stLiqSweep ? 0.15 : 0.0) + (stObTouch ? 0.20 : 0.0) + stHtfBias * 0.60 + fvgScore
+    stVoteWave := (stImpulseProb - stCorrectiveProb) * 0.80 + stFiboConf * 0.20
+    stVoteSmc := (stBos ? 0.25 : 0.0) + (stChoch ? -0.20 : 0.0) + (stFvgState == FVG_FRESH ? 0.25 : stFvgState == FVG_PARTIAL ? 0.10 : stFvgState == FVG_INVALID ? -0.25 : 0.0) + stHtfBias * 0.50
+
+fRuleScore() =>
+    s = 0.0
+    reason = "None"
+
+    if inEnableDecisionTree
+        if stRegime == REGIME_TREND
+            if stVoteTrend > 0.4 and stHtfBias > 0.2 and stCrossSignal >= 0
+                s := 0.80
+                reason := "TrendAligned"
+            else if stVoteTrend < -0.4 and stHtfBias < -0.2 and stCrossSignal <= 0
+                s := -0.80
+                reason := "TrendAlignedDown"
+        else if stRegime == REGIME_RANGE
+            if stVoteMomentum > 0.5 and stCorrectiveProb < 0.5
+                s := 0.45
+                reason := "RangeMomentumUp"
+            else if stVoteMomentum < -0.5 and stCorrectiveProb < 0.5
+                s := -0.45
+                reason := "RangeMomentumDown"
+        else if stFvgState == FVG_FRESH and stObTouch
+            s := 0.35 * math.sign(stHtfBias)
+            reason := "FVG_OB_Context"
+
+    stReason := reason
+    s
+
+fConsensusConflict() =>
+    a = stVoteTrend
+    b = stVoteMomentum
+    c = stVoteVolatility
+    d = stVoteStructure
+    e = stVoteWave
+    f = stVoteSmc
+    mean = (a + b + c + d + e + f) / 6.0
+    stConsensus := math.abs(mean)
+    disagree = (math.sign(a) != math.sign(b) ? 1 : 0) + (math.sign(a) != math.sign(d) ? 1 : 0) + (math.sign(b) != math.sign(d) ? 1 : 0) + (math.sign(e) != math.sign(f) ? 1 : 0)
+    stConflict := disagree / 4.0
+
+fTopModule() =>
+    va = math.abs(stVoteTrend)
+    vb = math.abs(stVoteMomentum)
+    vc = math.abs(stVoteVolatility)
+    vd = math.abs(stVoteStructure)
+    ve = math.abs(stVoteWave)
+    vf = math.abs(stVoteSmc)
+    mx = math.max(va, math.max(vb, math.max(vc, math.max(vd, math.max(ve, vf)))))
+    mx == va ? "Trend" : mx == vb ? "Momentum" : mx == vc ? "Volatility" : mx == vd ? "Structure" : mx == ve ? "Wave" : "SMC"
+
+fBuildTag() =>
+    // concise tag set for user confrontation on chart/pivot table
+    sReg = stRegime == REGIME_TREND ? "R:TR" : stRegime == REGIME_RANGE ? "R:RG" : stRegime == REGIME_VOLATILE ? "R:VO" : "R:TS"
+    sCross = stCrossSignal == 1 ? "X:WHITE" : stCrossSignal == -1 ? "X:BLACK" : "X:NONE"
+    sFvg = stFvgState == FVG_FRESH ? "FVG:FRESH" : stFvgState == FVG_PARTIAL ? "FVG:PART" : stFvgState == FVG_FILLED ? "FVG:FILLED" : stFvgState == FVG_INVALID ? "FVG:INVALID" : "FVG:NONE"
+    sStruct = stBos ? "BOS" : stChoch ? "CHOCH" : "STRUCT:NA"
+    sReg + "|" + sCross + "|" + sFvg + "|" + sStruct
+
+fEnsembleScore() =>
+    num = inWTrend * stVoteTrend + inWMomentum * stVoteMomentum + inWVolatility * stVoteVolatility + inWStructure * stVoteStructure + inWWave * stVoteWave + inWSmc * stVoteSmc
+    den = inWTrend + inWMomentum + inWVolatility + inWStructure + inWWave + inWSmc
+    fSafeDiv(num, den, 1e-6)
+
+fModeScore() =>
+    // explicit strategy mode behavior
+    if inEngineMode == MODE_ONE_ONLY
+        // select top module vote only
+        stTopModule == "Trend" ? stVoteTrend :
+         stTopModule == "Momentum" ? stVoteMomentum :
+         stTopModule == "Volatility" ? stVoteVolatility :
+         stTopModule == "Structure" ? stVoteStructure :
+         stTopModule == "Wave" ? stVoteWave : stVoteSmc
+    else if inEngineMode == MODE_MULTI_ENSEMBLE
+        // unweighted average
+        (stVoteTrend + stVoteMomentum + stVoteVolatility + stVoteStructure + stVoteWave + stVoteSmc) / 6.0
+    else
+        // weighted
+        fEnsembleScore()
+
+fPickSignal(score) =>
+    score >= inLongThreshold ? SIG_LONG : score <= inShortThreshold ? SIG_SHORT : SIG_WAIT
+
+fPickRisk(conf, volScore) =>
+    conf > 0.75 and math.abs(volScore) < 0.6 ? RISK_LOW : conf > 0.55 ? RISK_MED : RISK_HIGH
+
+// ============================================================
+// Table + Draw
+// ============================================================
+
+fTableHeader() =>
+    table.cell(gTable, 0, 0, "Bar", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 1, 0, "Tag", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 2, 0, "Reg", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 3, 0, "BodyR", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 4, 0, "RAtr", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 5, 0, "Candle", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 6, 0, "VolCon", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 7, 0, "VolBurn", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 8, 0, "Demand", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 9, 0, "FVG", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 10, 0, "Fill", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 11, 0, "Top", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 12, 0, "Score", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 13, 0, "Conf", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 14, 0, "Sig/Risk", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 15, 0, "Reason", text_color=color.white, bgcolor=color.new(color.black, 0))
+
+fTableRender() =>
+    fTableHeader()
+    sz = math.min(inTableRows, array.size(arrBar))
+    for r = 0 to inTableRows - 1
+        if r < sz
+            b = array.get(arrBar, r)
+            tg = array.get(arrTag, r)
+            rg = array.get(arrRegime, r)
+            br = array.get(arrBody, r)
+            ra = array.get(arrRatr, r)
+            cs = array.get(arrCandle, r)
+            vc = array.get(arrVolCon, r)
+            vb = array.get(arrVolBurn, r)
+            dm = array.get(arrDemand, r)
+            fs = array.get(arrFvgState, r)
+            ff = array.get(arrFvgFill, r)
+            tp = array.get(arrTop, r)
+            sc = array.get(arrScore, r)
+            cf = array.get(arrConf, r)
+            sg = array.get(arrSig, r)
+            rk = array.get(arrRisk, r)
+            rs = array.get(arrReason, r)
+
+            bg = sc > 0 ? color.new(fColorBull(), 85) : sc < 0 ? color.new(fColorBear(), 85) : color.new(fColorNeutral(), 85)
+            fvgText = fs == FVG_FRESH ? "FRESH" : fs == FVG_PARTIAL ? "PART" : fs == FVG_FILLED ? "FILLED" : fs == FVG_INVALID ? "INVALID" : "NONE"
+
+            table.cell(gTable, 0, r+1, str.tostring(b), bgcolor=bg)
+            table.cell(gTable, 1, r+1, tg, bgcolor=bg)
+            table.cell(gTable, 2, r+1, fRegimeText(rg), bgcolor=bg)
+            table.cell(gTable, 3, r+1, str.tostring(br, "#.##"), bgcolor=bg)
+            table.cell(gTable, 4, r+1, str.tostring(ra, "#.##"), bgcolor=bg)
+            table.cell(gTable, 5, r+1, str.tostring(cs, "#.##"), bgcolor=bg)
+            table.cell(gTable, 6, r+1, str.tostring(vc, "#.##"), bgcolor=bg)
+            table.cell(gTable, 7, r+1, str.tostring(vb, "#.##"), bgcolor=bg)
+            table.cell(gTable, 8, r+1, str.tostring(dm, "#.##"), bgcolor=bg)
+            table.cell(gTable, 9, r+1, fvgText, bgcolor=bg)
+            table.cell(gTable, 10, r+1, str.tostring(ff, "#.##"), bgcolor=bg)
+            table.cell(gTable, 11, r+1, tp, bgcolor=bg)
+            table.cell(gTable, 12, r+1, str.tostring(sc, "#.##"), bgcolor=bg)
+            table.cell(gTable, 13, r+1, str.tostring(cf, "#.##"), bgcolor=bg)
+            table.cell(gTable, 14, r+1, fSignalText(sg) + "/" + fRiskText(rk), bgcolor=bg)
+            table.cell(gTable, 15, r+1, rs, bgcolor=bg)
+        else
+            for c = 0 to 15
+                table.cell(gTable, c, r+1, "")
+
+fDrawSignal() =>
+    if not inShowVisual
+        return
+    col = stSignal == SIG_LONG ? fColorBull() : stSignal == SIG_SHORT ? fColorBear() : fColorNeutral()
+    alpha = stConfidence > 0.75 ? inAlphaStrong : stConfidence > 0.55 ? inAlphaMedium : inAlphaSoft
+    width = stConfidence > 0.75 ? inLineBold : stConfidence > 0.55 ? inLineNormal : inLineThin
+    style = fLineStyle(inLineStyleSignal)
+
+    y2 = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * 0.5 : stSignal == SIG_SHORT ? close - ta.atr(inAtrLen) * 0.5 : close
+    ln = line.new(bar_index, close, bar_index + 1, y2, xloc=xloc.bar_index, extend=extend.none, color=color.new(col, alpha), width=width, style=style)
+    array.unshift(gLines, ln)
+
+    tagTxt = stTag + "\n" + fSignalText(stSignal) + " / " + stReason
+    lb = label.new(bar_index, close, tagTxt, textcolor=col, color=color.new(color.black, 100), style=label.style_label_center, size=size.tiny)
+    array.unshift(gLabels, lb)
+
+    fPruneDraw()
+
+// ============================================================
+// Main
+// ============================================================
+
+isReady = bar_index > inWarmupBars
+
+if isReady
+    fProcessExp()
+
+    fComputeRatiosAndVolume()
+    fComputeIndicators()
+    fComputeStructure()
+    fComputeWave()
+    fClassifyRegime()
+    fComputeVotes()
+
+    stRuleScore := fRuleScore()
+    // consensus / conflict
+    a = stVoteTrend
+    b = stVoteMomentum
+    c = stVoteVolatility
+    d = stVoteStructure
+    e = stVoteWave
+    f = stVoteSmc
+    stConsensus := math.abs((a+b+c+d+e+f)/6.0)
+    disagree = (math.sign(a) != math.sign(b) ? 1 : 0) + (math.sign(a) != math.sign(d) ? 1 : 0) + (math.sign(b) != math.sign(d) ? 1 : 0) + (math.sign(e) != math.sign(f) ? 1 : 0)
+    stConflict := disagree / 4.0
+ fPivotEventSummary() =>
+    if array.size(pivEventTypeArr) == 0
+        "NA"
+    else
+        t = array.get(pivEventTypeArr, 0)
+        p = array.get(pivEventPriceArr, 0)
+        t + "@" + str.tostring(p, "#.##")
+
+fRelSummary() =>
+    "T:" + str.tostring(relTrend, "#.##") + " M:" + str.tostring(relMomentum, "#.##") + " S:" + str.tostring(relSmc, "#.##")
+    stTopModule := fTopModule()
+    modeScore = fModeScore()
+
+    stBucket := fStateBucket(stRegime, stVoteTrend, stVoteVolatility, stHtfBias)
+    stQScore := inEnableAdaptiveQ ? fQSigned(stBucket) : 0.0
+
+    rawFinal = 0.55 * modeScore + 0.30 * stRuleScore + (inWAdaptiveQ * 0.15 * stQScore) - inConflictPenalty * stConflict
+    stFinalScore := fClamp(rawFinal, -1.0, 1.0)
+    stConfidence := fClamp(math.abs(stFinalScore) * (0.5 + stConsensus * 0.5), 0.0, 1.0)
+
+    stSignal := fPickSignal(stFinalScore)
+    stRisk := fPickRisk(stConfidence, stVoteVolatility)
+
+    stTag := fBuildTag()
+
+    if inEnableAdaptiveQ and stSignal != SIG_WAIT
+        action = stSignal == SIG_LONG ? "L" : "S"
+        fPushExp(bar_index, stBucket, action, close)
+
+    // push table row
+    fPushInt(arrBar, bar_index, inTableRows)
+    fPushString(arrTag, stTag, inTableRows)
+    fPushInt(arrRegime, stRegime, inTableRows)
+    fPushFloat(arrBody, stBodyToRange, inTableRows)
+    fPushFloat(arrRatr, stRangeToAtr, inTableRows)
+    fPushFloat(arrCandle, stCandleSize, inTableRows)
+    fPushFloat(arrVolCon, stVolumeConsumed, inTableRows)
+    fPushFloat(arrVolBurn, stVolumeBurned, inTableRows)
+    fPushFloat(arrDemand, stDemandAvailability, inTableRows)
+    fPushInt(arrFvgState, stFvgState, inTableRows)
+    fPushFloat(arrFvgFill, stFvgFillRatio, inTableRows)
+    fPushString(arrTop, stTopModule, inTableRows)
+    fPushFloat(arrScore, stFinalScore, inTableRows)
+    fPushFloat(arrConf, stConfidence, inTableRows)
+    fPushInt(arrSig, stSignal, inTableRows)
+    fPushInt(arrRisk, stRisk, inTableRows)
+    fPushString(arrReason, stReason, inTableRows)
+
+    fTableRender()
+    fDrawSignal()
+
+    if inShowDebug
+        dbg = "Mode=" + inEngineMode + "\nBucket=" + stBucket + "\nTop=" + stTopModule + "\nFVGState=" + str.tostring(stFvgState)
+        label.new(bar_index, high, dbg, style=label.style_label_down, textcolor=color.white, color=color.new(color.blue, 75), size=size.tiny)
+else
+    if barstate.islast
+        label.new(bar_index, high, "Warmup " + str.tostring(bar_index) + "/" + str.tostring(inWarmupBars), style=label.style_label_down, textcolor=color.white, color=color.new(color.orange, 65), size=size.tiny)
+
+        
+
+// -----------------------------
+// [E] WEIGHT ADAPTATION HOOK
+// -----------------------------
+// use this in your weighted score function
+fDynamicWeightedScore(vTrend, vMom, vVol, vStruct, vWave, vSmc) =>
+    wfTrend = inWTrend * (inEnableReliability ? fRelFactor(relTrend) : 1.0)
+    wfMom = inWMomentum * (inEnableReliability ? fRelFactor(relMomentum) : 1.0)
+    wfVol = inWVolatility * (inEnableReliability ? fRelFactor(relVolatility) : 1.0)
+    wfStruct = inWStructure * (inEnableReliability ? fRelFactor(relStructure) : 1.0)
+    wfWave = inWWave * (inEnableReliability ? fRelFactor(relWave) : 1.0)
+    wfSmc = inWSmc * (inEnableReliability ? fRelFactor(relSmc) : 1.0)
+
+    num = wfTrend*vTrend + wfMom*vMom + wfVol*vVol + wfStruct*vStruct + wfWave*vWave + wfSmc*vSmc
+    den = wfTrend + wfMom + wfVol + wfStruct + wfWave + wfSmc
+    fSafeDiv(num, den, 1e-6)
+
+
+// ---------- Table ----------
+var table t=table.new(position.top_right, 10, inRows+1, border_width=1)
+table.cell(t,0,0,"Bar"), table.cell(t,1,0,"Mode"), table.cell(t,2,0,"Top"), table.cell(t,3,0,"Score"), table.cell(t,4,0,"Conf"), table.cell(t,5,0,"Sig"), table.cell(t,6,0,"Conflict"), table.cell(t,7,0,"PivotEvt"), table.cell(t,8,0,"Rel(T/M/S)"), table.cell(t,9,0,"Risk")
+
+fPivSummary()=>array.size(pivType)==0?"NA":array.get(pivType,0)+"@"+str.tostring(array.get(pivPrice,0),"#.##")
+fRelSummary()=> "T:"+str.tostring(relTrend,"#.##")+" M:"+str.tostring(relMom,"#.##")+" S:"+str.tostring(relSmc,"#.##")
+
+var arrBar=array.new_int(), arrTop=array.new_string(), arrSc=array.new_float(), arrCf=array.new_float(), arrSig=array.new_string(), arrCon=array.new_float(), arrP=array.new_string(), arrR=array.new_string(), arrRisk=array.new_string(), arrMode=array.new_string()
+fPushInt(arr,v,n)=>array.unshift(arr,v),array.size(arr)>n?array.pop(arr):na
+fPushFloat(arr,v,n)=>array.unshift(arr,v),array.size(arr)>n?array.pop(arr):na
+fPushStr(arr,v,n)=>array.unshift(arr,v),array.size(arr)>n?array.pop(arr):na
+
+if bar_index>inWarm
+    fPushInt(arrBar,bar_index,inRows), fPushStr(arrTop,top,inRows), fPushFloat(arrSc,final,inRows), fPushFloat(arrCf,conf,inRows), fPushStr(arrSig,sig==SIG_LONG?"LONG":sig==SIG_SHORT?"SHORT":"WAIT",inRows), fPushFloat(arrCon,conflict,inRows), fPushStr(arrP,fPivSummary(),inRows), fPushStr(arrR,fRelSummary(),inRows), fPushStr(arrRisk,risk,inRows), fPushStr(arrMode,inMode,inRows)
+
+for r=0 to inRows-1
+    if r<array.size(arrBar)
+        sc=array.get(arrSc,r)
+        bg=sc>0?color.new(bull,85):sc<0?color.new(bear,85):color.new(neut,85)
+        table.cell(t,0,r+1,str.tostring(array.get(arrBar,r)),bgcolor=bg)
+        table.cell(t,1,r+1,array.get(arrMode,r),bgcolor=bg)
+        table.cell(t,2,r+1,array.get(arrTop,r),bgcolor=bg)
+        table.cell(t,3,r+1,str.tostring(sc,"#.##"),bgcolor=bg)
+        table.cell(t,4,r+1,str.tostring(array.get(arrCf,r),"#.##"),bgcolor=bg)
+        table.cell(t,5,r+1,array.get(arrSig,r),bgcolor=bg)
+        table.cell(t,6,r+1,str.tostring(array.get(arrCon,r),"#.##"),bgcolor=bg)
+        table.cell(t,7,r+1,array.get(arrP,r),bgcolor=bg)
+        table.cell(t,8,r+1,array.get(arrR,r),bgcolor=bg)
+        table.cell(t,9,r+1,array.get(arrRisk,r),bgcolor=bg)
+    else
+        for c=0 to 9
+            table.cell(t,c,r+1,"")
+
+// ---------- Visual signal + stops/takes ----------
+if bar_index>inWarm
+    col=sig==SIG_LONG?bull:sig==SIG_SHORT?bear:neut
+    label.new(bar_index,close,(sig==SIG_LONG?"▲":"SIG_WAIT"== "WAIT" and sig==SIG_WAIT?"•":"▼")+" "+(sig==SIG_LONG?"LONG":sig==SIG_SHORT?"SHORT":"WAIT"),style=label.style_label_center,textcolor=col,color=color.new(color.black,100),size=size.tiny)
+    if sig!=SIG_WAIT
+        stop = sig==SIG_LONG ? close - atr*inRiskStopATR : close + atr*inRiskStopATR
+        take = sig==SIG_LONG ? close + atr*inRiskTakeATR : close - atr*inRiskTakeATR
+        line.new(bar_index,stop,bar_index+1,stop,color=color.new(bear,35),style=line.style_dashed,width=1)
+        line.new(bar_index,take,bar_index+1,take,color=color.new(bull,35),style=line.style_dashed,width=1)
+
+if inShowDebug
+    label.new(bar_index,high,"top="+top+"\nq="+str.tostring(qSigned,"#.##")+"\nconflict="+str.tostring(conflict,"#.##"),style=label.style_label_down,textcolor=color.white,color=color.new(color.blue,75),size=size.tiny)
