@@ -286,8 +286,6 @@ var float stVoteWave = na
 var float stVoteSmc = na
 
 var int stRegime = REGIME_TRANSITION
-var int stRegimePending = REGIME_TRANSITION
-var int stRegimeHold = 0
 
 var float stRuleScore = 0.0
 var float stQScore = 0.0
@@ -645,35 +643,37 @@ fComputeIndicators() =>
     macdLine = ta.ema(close, 12) - ta.ema(close, 26)
     macdSig = ta.ema(macdLine, 9)
     macdHist = macdLine - macdSig
-    stMacdScore := inEnableMACD ? fNormRobust(macdHist, 0.0, atr, inNormClamp) : 0.0
+    _macdScore = inEnableMACD ? fNormRobust(macdHist, 0.0, atr, inNormClamp) : 0.0
 
     // RSI
-    stRsiScore := inEnableRSI ? fNormRobust(ta.rsi(close, 14), 50.0, 20.0, inNormClamp) : 0.0
+    _rsiScore = inEnableRSI ? fNormRobust(ta.rsi(close, 14), 50.0, 20.0, inNormClamp) : 0.0
 
     // VWAP distance
-    stVwapScore := inEnableVWAP ? fNormRobust(close - ta.vwap(hlc3), 0.0, atr, inNormClamp) : 0.0
+    _vwapScore = inEnableVWAP ? fNormRobust(close - ta.vwap(hlc3), 0.0, atr, inNormClamp) : 0.0
 
     // MA stack
     ema20 = ta.ema(close, 20)
     ema50 = ta.ema(close, 50)
     ema200 = ta.ema(close, 200)
-    stMaScore := inEnableMAPack ? fNormRobust((ema20 - ema50) + (ema50 - ema200), 0.0, atr, inNormClamp) : 0.0
+    _maScore = inEnableMAPack ? fNormRobust((ema20 - ema50) + (ema50 - ema200), 0.0, atr, inNormClamp) : 0.0
 
-    // VIDYA
-    stVidya := inEnableVIDYA ? fVidya(close, inVidyaLen, inVidyaCmoLen) : na
-    stVidyaScore := inEnableVIDYA ? fNormRobust(ta.change(stVidya), 0.0, std, inNormClamp) : 0.0
+    // VIDYA – compute new value; derive change from the previous bar's global
+    // (stVidya holds the prior bar's value here; it will be updated at the call site)
+    _vidya = inEnableVIDYA ? fVidya(close, inVidyaLen, inVidyaCmoLen) : na
+    _vidyaChange = inEnableVIDYA and not na(stVidya) ? _vidya - stVidya : 0.0
+    _vidyaScore = inEnableVIDYA ? fNormRobust(_vidyaChange, 0.0, std, inNormClamp) : 0.0
 
     // Cycle module
     detrended = close - ta.ema(close, inCycleLen)
-    stCycleScore := inEnableCycles ? fNormRobust(detrended, 0.0, atr, inNormClamp) : 0.0
-    stCyclePhase := inEnableCycles ? fNormRobust(ta.change(detrended), 0.0, std, inNormClamp) : 0.0
+    _cycleScore = inEnableCycles ? fNormRobust(detrended, 0.0, atr, inNormClamp) : 0.0
+    _cyclePhase = inEnableCycles ? fNormRobust(ta.change(detrended), 0.0, std, inNormClamp) : 0.0
 
     // Crosses
     crossFast = ta.ema(close, inCrossFastLen)
     crossSlow = ta.ema(close, inCrossSlowLen)
     isWhite = inEnableWhiteCross and ta.crossover(crossFast, crossSlow)
     isBlack = inEnableBlackCross and ta.crossunder(crossFast, crossSlow)
-    stCrossSignal := isWhite ? 1 : isBlack ? -1 : 0
+    _crossSignal = isWhite ? 1 : isBlack ? -1 : 0
 
     // MTF blend
     den = inTfWFast + inTfWBase + inTfWSlow
@@ -684,8 +684,10 @@ fComputeIndicators() =>
     moB = fTfMom(inTfBase)
     moS = fTfMom(inTfSlow)
 
-    stMtfTrend := fSafeDiv(trF * inTfWFast + trB * inTfWBase + trS * inTfWSlow, den, 1e-6)
-    stMtfMomentum := fSafeDiv(moF * inTfWFast + moB * inTfWBase + moS * inTfWSlow, den, 1e-6)
+    _mtfTrend = fSafeDiv(trF * inTfWFast + trB * inTfWBase + trS * inTfWSlow, den, 1e-6)
+    _mtfMomentum = fSafeDiv(moF * inTfWFast + moB * inTfWBase + moS * inTfWSlow, den, 1e-6)
+
+    [_macdScore, _rsiScore, _vwapScore, _maScore, _vidya, _vidyaScore, _cycleScore, _cyclePhase, _crossSignal, _mtfTrend, _mtfMomentum]
 
 // ----------------------------------------------------------------------------
 // [B] Structure module (strict pivots + SMC context)
@@ -694,63 +696,75 @@ fComputeStructure() =>
     ph = ta.pivothigh(high, inPivotLeft, inPivotRight)
     pl = ta.pivotlow(low, inPivotLeft, inPivotRight)
 
-    if not na(ph)
-        stPrevPivotHigh := stLastPivotHigh
-        stLastPivotHigh := ph
-    if not na(pl)
-        stPrevPivotLow := stLastPivotLow
-        stLastPivotLow := pl
+    _lastPH = stLastPivotHigh
+    _prevPH = stPrevPivotHigh
+    _lastPL = stLastPivotLow
+    _prevPL = stPrevPivotLow
 
-    bullStruct = not na(stLastPivotHigh) and not na(stPrevPivotHigh) and stLastPivotHigh > stPrevPivotHigh
-    bearStruct = not na(stLastPivotLow) and not na(stPrevPivotLow) and stLastPivotLow < stPrevPivotLow
+    if not na(ph)
+        _prevPH := _lastPH
+        _lastPH := ph
+    if not na(pl)
+        _prevPL := _lastPL
+        _lastPL := pl
+
+    bullStruct = not na(_lastPH) and not na(_prevPH) and _lastPH > _prevPH
+    bearStruct = not na(_lastPL) and not na(_prevPL) and _lastPL < _prevPL
 
     prevDir = stStructureDir
-    stStructureDir := bullStruct ? 1 : bearStruct ? -1 : nz(stStructureDir[1], 0)
+    _structureDir = bullStruct ? 1 : bearStruct ? -1 : nz(prevDir, 0)
 
-    bosBull = inEnableBOS and stStructureDir == 1 and not na(stLastPivotHigh) and close > stLastPivotHigh
-    bosBear = inEnableBOS and stStructureDir == -1 and not na(stLastPivotLow) and close < stLastPivotLow
-    stBos := bosBull or bosBear
+    bosBull = inEnableBOS and _structureDir == 1 and not na(_lastPH) and close > _lastPH
+    bosBear = inEnableBOS and _structureDir == -1 and not na(_lastPL) and close < _lastPL
+    _bos = bosBull or bosBear
 
-    chochBull = inEnableCHOCH and prevDir == -1 and stStructureDir == 1 and not na(stLastPivotHigh) and close > stLastPivotHigh
-    chochBear = inEnableCHOCH and prevDir == 1 and stStructureDir == -1 and not na(stLastPivotLow) and close < stLastPivotLow
-    stChoch := chochBull or chochBear
+    chochBull = inEnableCHOCH and prevDir == -1 and _structureDir == 1 and not na(_lastPH) and close > _lastPH
+    chochBear = inEnableCHOCH and prevDir == 1 and _structureDir == -1 and not na(_lastPL) and close < _lastPL
+    _choch = chochBull or chochBear
 
-    stLiqSweep := inEnableLiquidity and ((high > ta.highest(high[1], 20) and close < high) or (low < ta.lowest(low[1], 20) and close > low))
-    stObTouch := inEnableOB and (math.abs(close - ta.sma(close, 50)) < ta.atr(inAtrLen) * 0.25)
-    stHtfBias := fNorm((ta.ema(close, 50) - ta.ema(close, 200)) / ta.atr(inAtrLen), 1.0)
+    _liqSweep = inEnableLiquidity and ((high > ta.highest(high[1], 20) and close < high) or (low < ta.lowest(low[1], 20) and close > low))
+    _obTouch = inEnableOB and (math.abs(close - ta.sma(close, 50)) < ta.atr(inAtrLen) * 0.25)
+    _htfBias = fNorm((ta.ema(close, 50) - ta.ema(close, 200)) / ta.atr(inAtrLen), 1.0)
 
     // capture events into pivot registry
-    fCapturePivotEvents(ph, pl, stBos, stChoch, stLastPivotHigh, stLastPivotLow, stStructureDir)
+    fCapturePivotEvents(ph, pl, _bos, _choch, _lastPH, _lastPL, _structureDir)
+
+    [_lastPH, _prevPH, _lastPL, _prevPL, _structureDir, _bos, _choch, _liqSweep, _obTouch, _htfBias]
 
 // ----------------------------------------------------------------------------
 // [C] Wave module
 // ----------------------------------------------------------------------------
 fComputeWave() =>
-    stImpulseProb := inEnableWaveImpulse ? fClamp(stMtfTrend * 0.5 + stMacdScore * 0.5 + 0.5, 0.0, 1.0) : 0.0
-    stCorrectiveProb := inEnableWaveCorrective ? fClamp(1.0 - stImpulseProb, 0.0, 1.0) : 0.0
-    stTriangleProb := inEnableWaveTriangle ? fClamp(0.5 - math.abs(stMtfTrend) * 0.4, 0.0, 1.0) : 0.0
-    stFiboConf := inEnableFibo ? fClamp(1.0 - math.abs(stCloseLocation - 0.618), 0.0, 1.0) : 0.0
+    _impulseProb = inEnableWaveImpulse ? fClamp(stMtfTrend * 0.5 + stMacdScore * 0.5 + 0.5, 0.0, 1.0) : 0.0
+    _correctiveProb = inEnableWaveCorrective ? fClamp(1.0 - _impulseProb, 0.0, 1.0) : 0.0
+    _triangleProb = inEnableWaveTriangle ? fClamp(0.5 - math.abs(stMtfTrend) * 0.4, 0.0, 1.0) : 0.0
+    _fiboConf = inEnableFibo ? fClamp(1.0 - math.abs(stCloseLocation - 0.618), 0.0, 1.0) : 0.0
+    [_impulseProb, _correctiveProb, _triangleProb, _fiboConf]
 
 // ----------------------------------------------------------------------------
 // [D] Regime classifier
 // ----------------------------------------------------------------------------
 fClassifyRegime() =>
+    var int _pending = REGIME_TRANSITION
+    var int _hold = 0
     raw = math.abs(stMtfTrend) > inTrendThreshold and stRangeToAtr > 0.8 ? REGIME_TREND :
       stRangeToAtr < inRangeAtrThreshold ? REGIME_RANGE :
       stRangeToAtr > inVolAtrThreshold ? REGIME_VOLATILE : REGIME_TRANSITION
 
-    if raw != stRegime
-        if raw != stRegimePending
-            stRegimePending := raw
-            stRegimeHold := 1
+    _regime = stRegime
+    if raw != _regime
+        if raw != _pending
+            _pending := raw
+            _hold := 1
         else
-            stRegimeHold += 1
-            if stRegimeHold >= inRegimeHoldBars
-                stRegime := raw
-                stRegimeHold := 0
+            _hold += 1
+            if _hold >= inRegimeHoldBars
+                _regime := raw
+                _hold := 0
     else
-        stRegimePending := stRegime
-        stRegimeHold := 0
+        _pending := _regime
+        _hold := 0
+    _regime
 
 // ----------------------------------------------------------------------------
 // [E] Vote stack + consensus/conflict + top module
@@ -761,23 +775,23 @@ fComputeVotes() =>
 
     crossBoost = stCrossSignal == 1 ? 0.20 : stCrossSignal == -1 ? -0.20 : 0.0
 
-    stVoteTrend := (stMaScore + stVidyaScore + stVwapScore + stMtfTrend + crossBoost) / 5.0
-    stVoteMomentum := (stMacdScore + stRsiScore + stMtfMomentum + stCycleScore * 0.5 + stCyclePhase * 0.5) / 4.0
-    stVoteVolatility := fNorm(stRangeToAtr - 1.0, 1.0)
+    _voteTrend = (stMaScore + stVidyaScore + stVwapScore + stMtfTrend + crossBoost) / 5.0
+    _voteMomentum = (stMacdScore + stRsiScore + stMtfMomentum + stCycleScore * 0.5 + stCyclePhase * 0.5) / 4.0
+    _voteVolatility = fNorm(stRangeToAtr - 1.0, 1.0)
 
-    stVoteStructure := (stBos ? 0.35 : 0.0) + (stChoch ? -0.30 : 0.0) + (stLiqSweep ? 0.15 : 0.0) + (stObTouch ? 0.20 : 0.0) + stHtfBias * 0.60
-    stVoteWave := (stImpulseProb - stCorrectiveProb) * 0.80 + stFiboConf * 0.20
-    stVoteSmc := (stBos ? 0.25 : 0.0) + (stChoch ? -0.20 : 0.0) + stHtfBias * 0.50 + fvgAggScore * (0.6 + 0.4 * fvgBestProx)
+    _voteStructure = (stBos ? 0.35 : 0.0) + (stChoch ? -0.30 : 0.0) + (stLiqSweep ? 0.15 : 0.0) + (stObTouch ? 0.20 : 0.0) + stHtfBias * 0.60
+    _voteWave = (stImpulseProb - stCorrectiveProb) * 0.80 + stFiboConf * 0.20
+    _voteSmc = (stBos ? 0.25 : 0.0) + (stChoch ? -0.20 : 0.0) + stHtfBias * 0.50 + fvgAggScore * (0.6 + 0.4 * fvgBestProx)
 
     // consensus / conflict
-    stConsensus := math.abs((stVoteTrend + stVoteMomentum + stVoteVolatility + stVoteStructure + stVoteWave + stVoteSmc) / 6.0)
+    _consensus = math.abs((_voteTrend + _voteMomentum + _voteVolatility + _voteStructure + _voteWave + _voteSmc) / 6.0)
 
-    sTrend = math.sign(stVoteTrend)
-    sMom   = math.sign(stVoteMomentum)
-    sVol   = math.sign(stVoteVolatility)
-    sStr   = math.sign(stVoteStructure)
-    sWave  = math.sign(stVoteWave)
-    sSmc   = math.sign(stVoteSmc)
+    sTrend = math.sign(_voteTrend)
+    sMom   = math.sign(_voteMomentum)
+    sVol   = math.sign(_voteVolatility)
+    sStr   = math.sign(_voteStructure)
+    sWave  = math.sign(_voteWave)
+    sSmc   = math.sign(_voteSmc)
 
     disagree = (sTrend != sMom  ? 1 : 0) +
                (sTrend != sVol  ? 1 : 0) +
@@ -795,7 +809,9 @@ fComputeVotes() =>
                (sStr   != sSmc  ? 1 : 0) +
                (sWave  != sSmc  ? 1 : 0)
 
-    stConflict := disagree / 15.0
+    _conflict = disagree / 15.0
+
+    [_voteTrend, _voteMomentum, _voteVolatility, _voteStructure, _voteWave, _voteSmc, _consensus, _conflict]
 
 fTopModule() =>
     va = math.abs(stVoteTrend)
@@ -831,8 +847,7 @@ fRuleScore() =>
                 s := -0.45
                 reason := "RangeMomentumDown"
 
-    stReason := reason
-    s
+    [s, reason]
 
 fDynamicWeightedScore(vTrend, vMom, vVol, vStruct, vWave, vSmc) =>
     wfTrend = inWTrend * (inEnableReliability ? fRelFactor(relTrend) : 1.0)
@@ -847,13 +862,13 @@ fDynamicWeightedScore(vTrend, vMom, vVol, vStruct, vWave, vSmc) =>
     fSafeDiv(num, den, 1e-6)
 
 fModeScore() =>
-    stTopModule := fTopModule()
+    _topModule = fTopModule()
 
-    oneOnly = stTopModule == "Trend" ? stVoteTrend :
-      stTopModule == "Momentum" ? stVoteMomentum :
-      stTopModule == "Volatility" ? stVoteVolatility :
-      stTopModule == "Structure" ? stVoteStructure :
-      stTopModule == "Wave" ? stVoteWave : stVoteSmc
+    oneOnly = _topModule == "Trend" ? stVoteTrend :
+      _topModule == "Momentum" ? stVoteMomentum :
+      _topModule == "Volatility" ? stVoteVolatility :
+      _topModule == "Structure" ? stVoteStructure :
+      _topModule == "Wave" ? stVoteWave : stVoteSmc
 
     multi = (stVoteTrend + stVoteMomentum + stVoteVolatility + stVoteStructure + stVoteWave + stVoteSmc) / 6.0
     weighted = fDynamicWeightedScore(stVoteTrend, stVoteMomentum, stVoteVolatility, stVoteStructure, stVoteWave, stVoteSmc)
@@ -863,7 +878,7 @@ fModeScore() =>
     if inMode == MODE_MULTI_ENSEMBLE and stConflict > 0.70 and math.abs(stVoteStructure) > 0.5 and math.sign(multi) != math.sign(stVoteStructure)
         out := 0.0
 
-    out
+    [out, _topModule]
 
     // ============================================================================
 // S6 BLOCK 4/4
@@ -899,6 +914,12 @@ fPivotEventAgeSummary() =>
 // [B] Experience processing: Q + reliability
 // ----------------------------------------------------------------------------
 fProcessExperiences() =>
+    _relTrend = relTrend
+    _relMomentum = relMomentum
+    _relVolatility = relVolatility
+    _relStructure = relStructure
+    _relWave = relWave
+    _relSmc = relSmc
     i = array.size(expBar) - 1
     while i >= 0
         startBar = array.get(expBar, i)
@@ -924,17 +945,17 @@ fProcessExperiences() =>
             if inEnableReliability
                 hit = reward > 0 ? 1.0 : 0.0
                 if moduleName == "Trend"
-                    relTrend := fUpdateRel(relTrend, hit)
+                    _relTrend := fUpdateRel(_relTrend, hit)
                 else if moduleName == "Momentum"
-                    relMomentum := fUpdateRel(relMomentum, hit)
+                    _relMomentum := fUpdateRel(_relMomentum, hit)
                 else if moduleName == "Volatility"
-                    relVolatility := fUpdateRel(relVolatility, hit)
+                    _relVolatility := fUpdateRel(_relVolatility, hit)
                 else if moduleName == "Structure"
-                    relStructure := fUpdateRel(relStructure, hit)
+                    _relStructure := fUpdateRel(_relStructure, hit)
                 else if moduleName == "Wave"
-                    relWave := fUpdateRel(relWave, hit)
+                    _relWave := fUpdateRel(_relWave, hit)
                 else if moduleName == "SMC"
-                    relSmc := fUpdateRel(relSmc, hit)
+                    _relSmc := fUpdateRel(_relSmc, hit)
 
             // remove resolved experience
             array.remove(expBar, i)
@@ -943,6 +964,7 @@ fProcessExperiences() =>
             array.remove(expEntry, i)
             array.remove(expModule, i)
         i -= 1
+    [_relTrend, _relMomentum, _relVolatility, _relStructure, _relWave, _relSmc]
 
 // ----------------------------------------------------------------------------
 // [C] Draw lifecycle objects
@@ -1088,20 +1110,20 @@ isReady = bar_index > inWarmupBars
 
 if isReady
     // 1) resolve historical experiences (Q + reliability)
-    fProcessExperiences()
+    [relTrend, relMomentum, relVolatility, relStructure, relWave, relSmc] := fProcessExperiences()
 
     // 2) compute feature layers
     [stBodyToRange, stUpperWick, stLowerWick, stRangeToAtr, stCloseLocation, stCandleSize, stVolumeConsumed, stVolumeBurned, stDemandAvailability] := fComputeRatiosAndVolume()
-    fComputeIndicators()
-    fComputeStructure()
+    [stMacdScore, stRsiScore, stVwapScore, stMaScore, stVidya, stVidyaScore, stCycleScore, stCyclePhase, stCrossSignal, stMtfTrend, stMtfMomentum] := fComputeIndicators()
+    [stLastPivotHigh, stPrevPivotHigh, stLastPivotLow, stPrevPivotLow, stStructureDir, stBos, stChoch, stLiqSweep, stObTouch, stHtfBias] := fComputeStructure()
     fUpdateFVGRegistry()
-    fComputeWave()
-    fClassifyRegime()
+    [stImpulseProb, stCorrectiveProb, stTriangleProb, stFiboConf] := fComputeWave()
+    stRegime := fClassifyRegime()
 
     // 3) score stack
-    fComputeVotes()
-    stRuleScore := fRuleScore()
-    stModeScore := fModeScore()
+    [stVoteTrend, stVoteMomentum, stVoteVolatility, stVoteStructure, stVoteWave, stVoteSmc, stConsensus, stConflict] := fComputeVotes()
+    [stRuleScore, stReason] := fRuleScore()
+    [stModeScore, stTopModule] := fModeScore()
 
     stBucket := fStateBucket(stRegime, stVoteTrend, stVoteVolatility, stHtfBias)
     stQScore := inEnableAdaptiveQ ? fQSigned(stBucket) : 0.0
