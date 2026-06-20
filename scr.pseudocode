@@ -1110,20 +1110,77 @@ isReady = bar_index > inWarmupBars
 
 if isReady
     // 1) resolve historical experiences (Q + reliability)
-    [relTrend, relMomentum, relVolatility, relStructure, relWave, relSmc] := fProcessExperiences()
+    // Pine tuples can only be destructured when declaring fresh locals with `=`, so copy tuple outputs into persistent state variables explicitly.
+    [_relTrend, _relMomentum, _relVolatility, _relStructure, _relWave, _relSmc] = fProcessExperiences()
+    relTrend := _relTrend
+    relMomentum := _relMomentum
+    relVolatility := _relVolatility
+    relStructure := _relStructure
+    relWave := _relWave
+    relSmc := _relSmc
 
     // 2) compute feature layers
-    [stBodyToRange, stUpperWick, stLowerWick, stRangeToAtr, stCloseLocation, stCandleSize, stVolumeConsumed, stVolumeBurned, stDemandAvailability] := fComputeRatiosAndVolume()
-    [stMacdScore, stRsiScore, stVwapScore, stMaScore, stVidya, stVidyaScore, stCycleScore, stCyclePhase, stCrossSignal, stMtfTrend, stMtfMomentum] := fComputeIndicators()
-    [stLastPivotHigh, stPrevPivotHigh, stLastPivotLow, stPrevPivotLow, stStructureDir, stBos, stChoch, stLiqSweep, stObTouch, stHtfBias] := fComputeStructure()
+    [_stBodyToRange, _stUpperWick, _stLowerWick, _stRangeToAtr, _stCloseLocation, _stCandleSize, _stVolumeConsumed, _stVolumeBurned, _stDemandAvailability] = fComputeRatiosAndVolume()
+    stBodyToRange := _stBodyToRange
+    stUpperWick := _stUpperWick
+    stLowerWick := _stLowerWick
+    stRangeToAtr := _stRangeToAtr
+    stCloseLocation := _stCloseLocation
+    stCandleSize := _stCandleSize
+    stVolumeConsumed := _stVolumeConsumed
+    stVolumeBurned := _stVolumeBurned
+    stDemandAvailability := _stDemandAvailability
+
+    [_stMacdScore, _stRsiScore, _stVwapScore, _stMaScore, _stVidya, _stVidyaScore, _stCycleScore, _stCyclePhase, _stCrossSignal, _stMtfTrend, _stMtfMomentum] = fComputeIndicators()
+    stMacdScore := _stMacdScore
+    stRsiScore := _stRsiScore
+    stVwapScore := _stVwapScore
+    stMaScore := _stMaScore
+    stVidya := _stVidya
+    stVidyaScore := _stVidyaScore
+    stCycleScore := _stCycleScore
+    stCyclePhase := _stCyclePhase
+    stCrossSignal := _stCrossSignal
+    stMtfTrend := _stMtfTrend
+    stMtfMomentum := _stMtfMomentum
+
+    [_stLastPivotHigh, _stPrevPivotHigh, _stLastPivotLow, _stPrevPivotLow, _stStructureDir, _stBos, _stChoch, _stLiqSweep, _stObTouch, _stHtfBias] = fComputeStructure()
+    stLastPivotHigh := _stLastPivotHigh
+    stPrevPivotHigh := _stPrevPivotHigh
+    stLastPivotLow := _stLastPivotLow
+    stPrevPivotLow := _stPrevPivotLow
+    stStructureDir := _stStructureDir
+    stBos := _stBos
+    stChoch := _stChoch
+    stLiqSweep := _stLiqSweep
+    stObTouch := _stObTouch
+    stHtfBias := _stHtfBias
     fUpdateFVGRegistry()
-    [stImpulseProb, stCorrectiveProb, stTriangleProb, stFiboConf] := fComputeWave()
+    [_stImpulseProb, _stCorrectiveProb, _stTriangleProb, _stFiboConf] = fComputeWave()
+    stImpulseProb := _stImpulseProb
+    stCorrectiveProb := _stCorrectiveProb
+    stTriangleProb := _stTriangleProb
+    stFiboConf := _stFiboConf
     stRegime := fClassifyRegime()
 
     // 3) score stack
-    [stVoteTrend, stVoteMomentum, stVoteVolatility, stVoteStructure, stVoteWave, stVoteSmc, stConsensus, stConflict] := fComputeVotes()
-    [stRuleScore, stReason] := fRuleScore()
-    [stModeScore, stTopModule] := fModeScore()
+    [_stVoteTrend, _stVoteMomentum, _stVoteVolatility, _stVoteStructure, _stVoteWave, _stVoteSmc, _stConsensus, _stConflict] = fComputeVotes()
+    stVoteTrend := _stVoteTrend
+    stVoteMomentum := _stVoteMomentum
+    stVoteVolatility := _stVoteVolatility
+    stVoteStructure := _stVoteStructure
+    stVoteWave := _stVoteWave
+    stVoteSmc := _stVoteSmc
+    stConsensus := _stConsensus
+    stConflict := _stConflict
+
+    [_stRuleScore, _stReason] = fRuleScore()
+    stRuleScore := _stRuleScore
+    stReason := _stReason
+
+    [_stModeScore, _stTopModule] = fModeScore()
+    stModeScore := _stModeScore
+    stTopModule := _stTopModule
 
     stBucket := fStateBucket(stRegime, stVoteTrend, stVoteVolatility, stHtfBias)
     stQScore := inEnableAdaptiveQ ? fQSigned(stBucket) : 0.0
