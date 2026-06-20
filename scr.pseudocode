@@ -658,6 +658,7 @@ fComputeIndicators() =>
     _maScore = inEnableMAPack ? fNormRobust((ema20 - ema50) + (ema50 - ema200), 0.0, atr, inNormClamp) : 0.0
 
     // VIDYA – compute new value; derive change from the previous bar's global
+    // (stVidya holds the prior bar's value here; it will be updated at the call site)
     _vidya = inEnableVIDYA ? fVidya(close, inVidyaLen, inVidyaCmoLen) : na
     _vidyaChange = inEnableVIDYA and not na(stVidya) ? _vidya - stVidya : 0.0
     _vidyaScore = inEnableVIDYA ? fNormRobust(_vidyaChange, 0.0, std, inNormClamp) : 0.0
