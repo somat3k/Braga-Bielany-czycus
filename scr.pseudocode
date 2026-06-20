@@ -766,10 +766,12 @@ fComputeVotes() =>
 
     disagree = (math.sign(stVoteTrend) != math.sign(stVoteMomentum) ? 1 : 0) +
       (math.sign(stVoteTrend) != math.sign(stVoteStructure) ? 1 : 0) +
+      (math.sign(stVoteTrend) != math.sign(stVoteWave) ? 1 : 0) +
       (math.sign(stVoteMomentum) != math.sign(stVoteStructure) ? 1 : 0) +
-      (math.sign(stVoteWave) != math.sign(stVoteSmc) ? 1 : 0)
+      (math.sign(stVoteMomentum) != math.sign(stVoteSmc) ? 1 : 0) +
+      (math.sign(stVoteStructure) != math.sign(stVoteSmc) ? 1 : 0)
 
-    stConflict := disagree / 4.0
+    stConflict := disagree / 6.0
 
 fTopModule() =>
     va = math.abs(stVoteTrend)
@@ -952,8 +954,9 @@ var arrVolBurn = array.new_float()
 var arrDemand = array.new_float()
 var arrRel = array.new_string()
 var arrPivot = array.new_string()
+var arrConflict = array.new_float()
 
-var table gTable = table.new(position.top_right, 16, inTableRows + 1, border_width=1)
+var table gTable = table.new(position.top_right, 17, inTableRows + 1, border_width=1)
 
 fTableHeader() =>
     table.cell(gTable, 0, 0, "Bar", text_color=color.white, bgcolor=color.new(color.black, 0))
@@ -972,6 +975,7 @@ fTableHeader() =>
     table.cell(gTable, 13, 0, "Reason", text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(gTable, 14, 0, "PivotEvt", text_color=color.white, bgcolor=color.new(color.black, 0))
     table.cell(gTable, 15, 0, "Rel(T/M/S)", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(gTable, 16, 0, "Conflict", text_color=color.white, bgcolor=color.new(color.black, 0))
 fTableRender() =>
     fTableHeader()
     sz = math.min(inTableRows, array.size(arrBar))
@@ -994,135 +998,33 @@ fTableRender() =>
             rs = array.get(arrReason, r)
             pe = array.get(arrPivot, r)
             rl = array.get(arrRel, r)
+            cx = array.size(arrConflict) > r ? array.get(arrConflict, r) : na
 
             bg = sc > 0 ? color.new(fColorBull(), 85) : sc < 0 ? color.new(fColorBear(), 85) : color.new(fColorNeutral(), 85)
+            sigTxt = sg == SIG_LONG ? fColorBull() : sg == SIG_SHORT ? fColorBear() : color.white
+            scTxt  = sc > 0 ? fColorBull() : sc < 0 ? fColorBear() : color.white
+            cxTxt  = na(cx) ? color.white : cx > 0.66 ? fColorBear() : cx > 0.33 ? color.yellow : fColorBull()
 
-            table.cell(gTable, 0, r + 1, str.tostring(b), bgcolor=bg)
-            table.cell(gTable, 1, r + 1, tg, bgcolor=bg)
-            table.cell(gTable, 2, r + 1, fRegimeText(rg), bgcolor=bg)
-            table.cell(gTable, 3, r + 1, str.tostring(br, "#.##"), bgcolor=bg)
-            table.cell(gTable, 4, r + 1, str.tostring(ra, "#.##"), bgcolor=bg)
-            table.cell(gTable, 5, r + 1, str.tostring(cs, "#.##"), bgcolor=bg)
-            table.cell(gTable, 6, r + 1, str.tostring(vc, "#.##"), bgcolor=bg)
-            table.cell(gTable, 7, r + 1, str.tostring(vb, "#.##"), bgcolor=bg)
-            table.cell(gTable, 8, r + 1, str.tostring(dm, "#.##"), bgcolor=bg)
-            table.cell(gTable, 9, r + 1, tp, bgcolor=bg)
-            table.cell(gTable, 10, r + 1, str.tostring(sc, "#.##"), bgcolor=bg)
-            table.cell(gTable, 11, r + 1, str.tostring(cf, "#.##"), bgcolor=bg)
-            table.cell(gTable, 12, r + 1, fSignalText(sg) + "/" + fRiskText(rk), bgcolor=bg)
-            table.cell(gTable, 13, r + 1, rs, bgcolor=bg)
-            table.cell(gTable, 14, r + 1, pe, bgcolor=bg)
-            table.cell(gTable, 15, r + 1, rl, bgcolor=bg)
+            table.cell(gTable, 0, r + 1, str.tostring(b), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 1, r + 1, tg, text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 2, r + 1, fRegimeText(rg), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 3, r + 1, str.tostring(br, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 4, r + 1, str.tostring(ra, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 5, r + 1, str.tostring(cs, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 6, r + 1, str.tostring(vc, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 7, r + 1, str.tostring(vb, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 8, r + 1, str.tostring(dm, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 9, r + 1, tp, text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 10, r + 1, str.tostring(sc, "#.##"), text_color=scTxt, bgcolor=bg)
+            table.cell(gTable, 11, r + 1, str.tostring(cf, "#.##"), text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 12, r + 1, fSignalText(sg) + "/" + fRiskText(rk), text_color=sigTxt, bgcolor=bg)
+            table.cell(gTable, 13, r + 1, rs, text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 14, r + 1, pe, text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 15, r + 1, rl, text_color=color.white, bgcolor=bg)
+            table.cell(gTable, 16, r + 1, na(cx) ? "—" : str.tostring(cx, "#.##"), text_color=cxTxt, bgcolor=bg)
         else
-            for c = 0 to 15
+            for c = 0 to 16
                 table.cell(gTable, c, r + 1, "")
-
-fDrawSignal() =>
-    if not inShowVisual
-        return
-
-    col = stSignal == SIG_LONG ? fColorBull() : stSignal == SIG_SHORT ? fColorBear() : fColorNeutral()
-    alpha = stConfidence > 0.75 ? inAlphaStrong : stConfidence > 0.55 ? inAlphaMedium : inAlphaSoft
-    width = stConfidence > 0.75 ? inLineBold : stConfidence > 0.55 ? inLineNormal : inLineThin
-    style = fLineStyle(inLineStyleSignal)
-
-    y2 = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * 0.5 : stSignal == SIG_SHORT ? close - ta.atr(inAtrLen) * 0.5 : close
-    ln = line.new(bar_index, close, bar_index + 1, y2, xloc=xloc.bar_index, extend=extend.none, color=color.new(col, alpha), width=width, style=style)
-    array.unshift(gLines, ln)
-
-    txt = stSignal == SIG_LONG ? "▲ LONG" : stSignal == SIG_SHORT ? "▼ SHORT" : "• WAIT"
-    lb = label.new(bar_index, close, txt + "\n" + stTag, textcolor=col, color=color.new(color.black, 100), style=label.style_label_center, size=size.tiny)
-    array.unshift(gLabels, lb)
-
-    if stSignal != SIG_WAIT
-        stopPx = stSignal == SIG_LONG ? close - ta.atr(inAtrLen) * inRiskStopATR : close + ta.atr(inAtrLen) * inRiskStopATR
-        takePx = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * inRiskTakeATR : close - ta.atr(inAtrLen) * inRiskTakeATR
-        lStop = line.new(bar_index, stopPx, bar_index + 1, stopPx, xloc=xloc.bar_index, color=color.new(fColorBear(), 35), style=line.style_dashed, width=1)
-        lTake = line.new(bar_index, takePx, bar_index + 1, takePx, xloc=xloc.bar_index, color=color.new(fColorBull(), 35), style=line.style_dashed, width=1)
-        array.unshift(gLines, lStop)
-        array.unshift(gLines, lTake)
-
-    fPruneDraw()
-
-isReady = bar_index > inWarmupBars
-
-if isReady
-    fProcessExperiences()
-
-    fComputeRatiosAndVolume()
-    fComputeIndicators()
-    fComputeStructure()
-    fUpdateFVGRegistry()
-    fComputeWave()
-    fClassifyRegime()
-
-    fComputeVotes()
-    stRuleScore := fRuleScore()
-    stModeScore := fModeScore()
-
-    stBucket := fStateBucket(stRegime, stVoteTrend, stVoteVolatility, stHtfBias)
-    stQScore := inEnableAdaptiveQ ? fQSigned(stBucket) : 0.0
-
-    rawFinal = 0.55 * stModeScore + 0.30 * stRuleScore + (inWAdaptiveQ * 0.15 * stQScore) - inConflictPenalty * stConflict
-    stFinalScore := fClamp(rawFinal, -1.0, 1.0)
-    stConfidence := fClamp(math.abs(stFinalScore) * (0.5 + stConsensus * 0.5), 0.0, 1.0)
-
-    stSignal := stConflict >= inConflictNoTrade ? SIG_WAIT : fPickSignal(stFinalScore)
-    stRisk := fPickRisk(stConfidence, stVoteVolatility)
-    stTag := fBuildTag()
-
-    if inEnableAdaptiveQ and stSignal != SIG_WAIT
-        action = stSignal == SIG_LONG ? "L" : "S"
-        fPushExpWithModule(bar_index, stBucket, action, close, stTopModule)
-
-    fPushInt(arrBar, bar_index, inTableRows)
-    fPushString(arrTag, stTag, inTableRows)
-    fPushInt(arrRegime, stRegime, inTableRows)
-    fPushFloat(arrBody, stBodyToRange, inTableRows)
-    fPushFloat(arrRatr, stRangeToAtr, inTableRows)
-    fPushFloat(arrCandle, stCandleSize, inTableRows)
-    fPushFloat(arrVolCon, stVolumeConsumed, inTableRows)
-    fPushFloat(arrVolBurn, stVolumeBurned, inTableRows)
-    fPushFloat(arrDemand, stDemandAvailability, inTableRows)
-    fPushString(arrTop, stTopModule, inTableRows)
-    fPushFloat(arrScore, stFinalScore, inTableRows)
-    fPushFloat(arrConf, stConfidence, inTableRows)
-    fPushInt(arrSig, stSignal, inTableRows)
-    fPushInt(arrRisk, stRisk, inTableRows)
-    fPushString(arrReason, stReason, inTableRows)
-    fPushString(arrPivot, fPivotEventSummary() + "|" + fPivotEventAgeSummary(), inTableRows)
-    fPushString(arrRel, fRelSummary(), inTableRows)
-
-    fTableRender()
-    fDrawSignal()
-
-    if inShowDebug
-        dbg = "Mode=" + inMode +
-          "\nBucket=" + stBucket +
-          "\nTop=" + stTopModule +
-          "\nQ=" + str.tostring(stQScore, "#.##") +
-          "\nConflict=" + str.tostring(stConflict, "#.##") +
-          "\nActiveFVG=" + str.tostring(array.size(fvgTopArr))
-        lbDbg = label.new(bar_index, high, dbg, style=label.style_label_down, textcolor=color.white, color=color.new(color.blue, 75), size=size.tiny)
-        array.unshift(gLabels, lbDbg)
-        fPruneDraw()
-else
-    if barstate.islast
-        label.new(bar_index, high, "Warmup " + str.tostring(bar_index) + "/" + str.tostring(inWarmupBars), style=label.style_label_down, textcolor=color.white, color=color.new(color.orange, 65), size=size.tiny)
-
-    if inShowDebug
-        dbg = "Mode=" + inMode +
-          "\nBucket=" + stBucket +
-          "\nTop=" + stTopModule +
-          "\nQ=" + str.tostring(stQScore, "#.##") +
-          "\nConflict=" + str.tostring(stConflict, "#.##") +
-          "\nActiveFVG=" + str.tostring(array.size(fvgTopArr))
-        lbDbg = label.new(bar_index, high, dbg, style=label.style_label_down, textcolor=color.white, color=color.new(color.blue, 75), size=size.tiny)
-        array.unshift(gLabels, lbDbg)
-        fPruneDraw()
-else
-    if barstate.islast
-        label.new(bar_index, high, "Warmup " + str.tostring(bar_index) + "/" + str.tostring(inWarmupBars), style=label.style_label_down, textcolor=color.white, color=color.new(color.orange, 65), size=size.tiny)
 
 // ----------------------------------------------------------------------------
 // [E] Visual signal output
@@ -1213,6 +1115,7 @@ if isReady
     fPushString(arrReason, stReason, inTableRows)
     fPushString(arrPivot, fPivotEventSummary() + "|" + fPivotEventAgeSummary(), inTableRows)
     fPushString(arrRel, fRelSummary(), inTableRows)
+    fPushFloat(arrConflict, stConflict, inTableRows)
 
     // 7) render
     fTableRender()
