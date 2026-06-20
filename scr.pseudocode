@@ -834,7 +834,6 @@ fModeScore() =>
 
     out = inMode == MODE_ONE_ONLY ? oneOnly : inMode == MODE_MULTI_ENSEMBLE ? multi : weighted
 
-    // MULTI policy veto
     if inMode == MODE_MULTI_ENSEMBLE and stConflict > 0.70 and math.abs(stVoteStructure) > 0.5 and math.sign(multi) != math.sign(stVoteStructure)
         out := 0.0
 
