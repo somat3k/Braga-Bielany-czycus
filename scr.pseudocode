@@ -772,22 +772,28 @@ fComputeVotes() =>
 
     sTrend = math.sign(stVoteTrend)
     sMom   = math.sign(stVoteMomentum)
+    sVol   = math.sign(stVoteVolatility)
     sStr   = math.sign(stVoteStructure)
     sWave  = math.sign(stVoteWave)
     sSmc   = math.sign(stVoteSmc)
 
     disagree = (sTrend != sMom   ? 1 : 0) +
+      (sTrend != sVol   ? 1 : 0) +
       (sTrend != sStr   ? 1 : 0) +
       (sTrend != sWave  ? 1 : 0) +
       (sTrend != sSmc   ? 1 : 0) +
+      (sMom   != sVol   ? 1 : 0) +
       (sMom   != sStr   ? 1 : 0) +
       (sMom   != sWave  ? 1 : 0) +
       (sMom   != sSmc   ? 1 : 0) +
+      (sVol   != sStr   ? 1 : 0) +
+      (sVol   != sWave  ? 1 : 0) +
+      (sVol   != sSmc   ? 1 : 0) +
       (sStr   != sWave  ? 1 : 0) +
       (sStr   != sSmc   ? 1 : 0) +
       (sWave  != sSmc   ? 1 : 0)
 
-    stConflict := disagree / 10.0
+    stConflict := disagree / 15.0
 
 fTopModule() =>
     va = math.abs(stVoteTrend)
@@ -1017,9 +1023,9 @@ fTableRender() =>
             cx = array.size(arrConflict) > r ? array.get(arrConflict, r) : na
 
             bg = sc > 0 ? color.new(fColorBull(), 85) : sc < 0 ? color.new(fColorBear(), 85) : color.new(fColorNeutral(), 85)
-            sigTxt = sg == SIG_LONG ? fColorBull() : sg == SIG_SHORT ? fColorBear() : color.white
-            scTxt  = sc > 0 ? fColorBull() : sc < 0 ? fColorBear() : color.white
-            cxTxt  = fConflictColor(cx)
+            sigColor = sg == SIG_LONG ? fColorBull() : sg == SIG_SHORT ? fColorBear() : color.white
+            scColor  = sc > 0 ? fColorBull() : sc < 0 ? fColorBear() : color.white
+            cxColor  = fConflictColor(cx)
 
             table.cell(gTable, 0, r + 1, str.tostring(b), text_color=color.white, bgcolor=bg)
             table.cell(gTable, 1, r + 1, tg, text_color=color.white, bgcolor=bg)
@@ -1031,13 +1037,13 @@ fTableRender() =>
             table.cell(gTable, 7, r + 1, str.tostring(vb, "#.##"), text_color=color.white, bgcolor=bg)
             table.cell(gTable, 8, r + 1, str.tostring(dm, "#.##"), text_color=color.white, bgcolor=bg)
             table.cell(gTable, 9, r + 1, tp, text_color=color.white, bgcolor=bg)
-            table.cell(gTable, 10, r + 1, str.tostring(sc, "#.##"), text_color=scTxt, bgcolor=bg)
+            table.cell(gTable, 10, r + 1, str.tostring(sc, "#.##"), text_color=scColor, bgcolor=bg)
             table.cell(gTable, 11, r + 1, str.tostring(cf, "#.##"), text_color=color.white, bgcolor=bg)
-            table.cell(gTable, 12, r + 1, fSignalText(sg) + "/" + fRiskText(rk), text_color=sigTxt, bgcolor=bg)
+            table.cell(gTable, 12, r + 1, fSignalText(sg) + "/" + fRiskText(rk), text_color=sigColor, bgcolor=bg)
             table.cell(gTable, 13, r + 1, rs, text_color=color.white, bgcolor=bg)
             table.cell(gTable, 14, r + 1, pe, text_color=color.white, bgcolor=bg)
             table.cell(gTable, 15, r + 1, rl, text_color=color.white, bgcolor=bg)
-            table.cell(gTable, 16, r + 1, na(cx) ? "—" : str.tostring(cx, "#.##"), text_color=cxTxt, bgcolor=bg)
+            table.cell(gTable, 16, r + 1, na(cx) ? "—" : str.tostring(cx, "#.##"), text_color=cxColor, bgcolor=bg)
         else
             for c = 0 to 16
                 table.cell(gTable, c, r + 1, "")
