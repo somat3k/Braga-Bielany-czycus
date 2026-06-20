@@ -37,6 +37,9 @@ const int FVG_PARTIAL = 2
 const int FVG_FILLED = 3
 const int FVG_INVALID = 4
 
+const float CONFLICT_HIGH = 0.66
+const float CONFLICT_MED  = 0.33
+
 // ----------------------------------------------------------------------------
 // [B] Inputs
 // ----------------------------------------------------------------------------
@@ -767,11 +770,15 @@ fComputeVotes() =>
     disagree = (math.sign(stVoteTrend) != math.sign(stVoteMomentum) ? 1 : 0) +
       (math.sign(stVoteTrend) != math.sign(stVoteStructure) ? 1 : 0) +
       (math.sign(stVoteTrend) != math.sign(stVoteWave) ? 1 : 0) +
+      (math.sign(stVoteTrend) != math.sign(stVoteSmc) ? 1 : 0) +
       (math.sign(stVoteMomentum) != math.sign(stVoteStructure) ? 1 : 0) +
+      (math.sign(stVoteMomentum) != math.sign(stVoteWave) ? 1 : 0) +
       (math.sign(stVoteMomentum) != math.sign(stVoteSmc) ? 1 : 0) +
-      (math.sign(stVoteStructure) != math.sign(stVoteSmc) ? 1 : 0)
+      (math.sign(stVoteStructure) != math.sign(stVoteWave) ? 1 : 0) +
+      (math.sign(stVoteStructure) != math.sign(stVoteSmc) ? 1 : 0) +
+      (math.sign(stVoteWave) != math.sign(stVoteSmc) ? 1 : 0)
 
-    stConflict := disagree / 6.0
+    stConflict := disagree / 10.0
 
 fTopModule() =>
     va = math.abs(stVoteTrend)
@@ -1003,7 +1010,7 @@ fTableRender() =>
             bg = sc > 0 ? color.new(fColorBull(), 85) : sc < 0 ? color.new(fColorBear(), 85) : color.new(fColorNeutral(), 85)
             sigTxt = sg == SIG_LONG ? fColorBull() : sg == SIG_SHORT ? fColorBear() : color.white
             scTxt  = sc > 0 ? fColorBull() : sc < 0 ? fColorBear() : color.white
-            cxTxt  = na(cx) ? color.white : cx > 0.66 ? fColorBear() : cx > 0.33 ? color.yellow : fColorBull()
+            cxTxt  = na(cx) ? color.white : cx > CONFLICT_HIGH ? fColorBear() : cx > CONFLICT_MED ? color.yellow : fColorBull()
 
             table.cell(gTable, 0, r + 1, str.tostring(b), text_color=color.white, bgcolor=bg)
             table.cell(gTable, 1, r + 1, tg, text_color=color.white, bgcolor=bg)
