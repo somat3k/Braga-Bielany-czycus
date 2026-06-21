@@ -588,7 +588,7 @@ fUpdateFVGRegistryLifecycle() =>
             bull = array.get(fvgBullArr, i)
             birth = array.get(fvgBirthArr, i)
             prevState = array.get(fvgStateArr, i)
-            fillPct = array.get(fvgFillArr, i)
+            fillPercentage = array.get(fvgFillArr, i)
 
             zone = math.max(top - bot, syminfo.mintick)
             touched = low <= top and high >= bot
@@ -672,7 +672,7 @@ fUpdateFVGRegistryRender() =>
                 box.set_border_width(bx, inFVGBorderWidth)
 
             if inFVGLabelFill and state != FVG_INVALID
-                txt = str.tostring(fillPct * 100.0, "#.0") + "%"
+                txt = str.tostring(fillPercentage * 100.0, "#.0") + "%"
                 yMid = (top + bot) * 0.5
                 if na(lb)
                     nlb = label.new(bar_index, yMid, txt, xloc=xloc.bar_index, style=label.style_label_center, textcolor=color.white, color=color.new(color.black, 100), size=size.tiny)
@@ -1385,6 +1385,7 @@ fClearBoxArray(arr) =>
     0
 
 fFibPrice(_isUp, _lo, _hi, _lvl, _isExt) =>
+    // Ensure a meaningful range for tiny-price instruments and flat pivots.
     minRng = math.max(math.abs(_hi) * MIN_FIB_RANGE_PCT, syminfo.mintick * MIN_FIB_TICK_MULT)
     rng = math.max(_hi - _lo, minRng)
     _isUp ? (_isExt ? _hi + rng * (_lvl - 1.0) : _hi - rng * _lvl) : (_isExt ? _lo - rng * (_lvl - 1.0) : _lo + rng * _lvl)
@@ -1463,7 +1464,8 @@ fUpdateWedge() =>
         iL = lP1 - slopeL * lB1
         den = slopeH - slopeL
         xIntersect = fSafeDiv(iL - iH, den, 1e-6)
-        if math.abs(den) > EPSILON and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
+        isValidWedgeIntersection = math.abs(den) > EPSILON and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
+        if isValidWedgeIntersection
             x2 = bar_index + inWedgeLookAhead
             yH2 = hP1 + slopeH * (x2 - hB1)
             yL2 = lP1 + slopeL * (x2 - lB1)
@@ -1545,7 +1547,7 @@ fAddOBZone(_top, _bot, _bull, _birth) =>
         array.shift(gObBirth)
         if not na(oldBx)
             box.delete(oldBx)
-    c = color.new(_bull ? fColorBull() : fColorOB(), inAlphaMedium)
+    c = color.new(_bull ? fColorBull() : fColorBear(), inAlphaMedium)
     bx = box.new(
          _birth,
          _top,
