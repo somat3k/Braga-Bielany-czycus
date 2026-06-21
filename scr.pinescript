@@ -1,5 +1,5 @@
 //@version=6
-indicator("Pinacle Master Scaffold v6 • Session 6", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=400)
+indicator("Pinnacle Master Scaffold v6 • Session 6", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=400)
 
 // ============================================================================
 // S6 BLOCK 1/4
