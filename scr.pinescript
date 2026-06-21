@@ -1,5 +1,5 @@
 //@version=6
-indicator("Pinacle Master Scaffold v6 • Session 6", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=400)
+indicator("Pinnacle Master Scaffold v6 • Session 6", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=400)
 
 // ============================================================================
 // S6 BLOCK 1/4
@@ -39,6 +39,12 @@ const int FVG_INVALID = 4
 
 const float CONFLICT_HIGH = 0.66
 const float CONFLICT_MED  = 0.33
+const int PIVOT_HISTORY_SIZE = 12
+const int LEGEND_COLS = 3
+const int LEGEND_ROWS = 7
+const float MIN_FIB_RANGE_PCT = 0.0001
+const float MIN_FIB_TICK_MULT = 10.0
+const float EPSILON = 1e-6
 
 // ----------------------------------------------------------------------------
 // [B] Inputs
@@ -156,14 +162,112 @@ inShowVisual = input.bool(true, "Enable Visual Markers", group=groupVisual)
 inShowDebug = input.bool(false, "Enable Debug Labels", group=groupVisual)
 inTableRows = input.int(18, "Pivot Table Rows", minval=6, maxval=40, group=groupVisual)
 inDrawBudget = input.int(240, "Draw Budget", minval=50, maxval=450, group=groupVisual)
-inTheme = input.string("Nebula", "Theme", options=["Nebula", "Monochrome Pro", "SMC Tactical", "Aurora"], group=groupVisual)
-inLineStyleSignal = input.string("Solid", "Signal Line Style", options=["Solid", "Dashed", "Dotted"], group=groupVisual)
-inLineThin = input.int(1, "Line Thin", minval=1, maxval=4, group=groupVisual)
-inLineNormal = input.int(2, "Line Normal", minval=1, maxval=6, group=groupVisual)
-inLineBold = input.int(3, "Line Bold", minval=1, maxval=8, group=groupVisual)
-inAlphaStrong = input.int(10, "Alpha Strong", minval=0, maxval=90, group=groupVisual)
-inAlphaMedium = input.int(35, "Alpha Medium", minval=0, maxval=95, group=groupVisual)
-inAlphaSoft = input.int(65, "Alpha Soft", minval=0, maxval=99, group=groupVisual)
+inTheme = input.string("Nebula", "Theme", options=["Nebula", "Monochrome Pro", "SMC Tactical", "Aurora", "Neon Dark", "Earth Tones"], group=groupVisual)
+inHistAlphaStrong = input.int(10, "Histogram Alpha Strong", minval=0, maxval=90, group=groupVisual)
+inHistAlphaMed    = input.int(35, "Histogram Alpha Medium", minval=0, maxval=95, group=groupVisual)
+inHistAlphaSoft   = input.int(65, "Histogram Alpha Soft", minval=0, maxval=99, group=groupVisual)
+inShowFibo = input.bool(true, "Show Fibonacci", group=groupVisual)
+inFiboExtMode = input.string("Both", "Fibo Mode", options=["Retracement", "Extension", "Both"], group=groupVisual)
+inFiboLevels = input.string("All", "Fibo Levels", options=["Basic", "Extended", "All"], group=groupVisual)
+inShowOBZones = input.bool(true, "Show OB Zones", group=groupVisual)
+inShowPitchFork = input.bool(true, "Show Pitchfork/PitchFan", group=groupVisual)
+inShowDots = input.bool(true, "Show Dots", group=groupVisual)
+inShowCrossMarkers = input.bool(true, "Show Cross Markers", group=groupVisual)
+inShowHistogram = input.bool(true, "Show Histogram", group=groupVisual)
+inShowHistogramPane = input.bool(false, "Show Histogram Plot", group=groupVisual)
+inShowLineLegend = input.bool(false, "Show Line Legend", group=groupVisual)
+inWedgeLookAhead = input.int(80, "Wedge/Pitch Lookahead", minval=20, maxval=500, group=groupVisual)
+inMaxFibLabels = input.int(12, "Max Fib Labels", minval=4, maxval=30, group=groupVisual)
+inFVGLabelFill = input.bool(false, "FVG Fill Labels", group=groupVisual)
+inFVGShowMidLine = input.bool(false, "FVG Midline", group=groupVisual)
+inOBLookback = input.int(30, "OB Lookback", minval=5, maxval=120, group=groupVisual)
+inMaxOBBoxes = input.int(8, "Max OB Boxes", minval=2, maxval=20, group=groupVisual)
+
+groupLinePalette = "Line Palette"
+inUseLinePaletteOverrides = input.bool(false, "Use Palette Overrides", group=groupLinePalette)
+inLineColBull = input.color(color.rgb(0, 255, 170), "Bull Base Color", group=groupLinePalette)
+inLineColBear = input.color(color.rgb(255, 90, 180), "Bear Base Color", group=groupLinePalette)
+inLineColNeutral = input.color(color.rgb(130, 150, 255), "Neutral Base Color", group=groupLinePalette)
+inLineColFib = input.color(color.rgb(250, 210, 120), "Fib Color", group=groupLinePalette)
+inLineColOB = input.color(color.rgb(255, 170, 90), "OB Color", group=groupLinePalette)
+inLineColFork = input.color(color.rgb(160, 200, 255), "Fork Color", group=groupLinePalette)
+
+groupDrawSignal = "Drawings: Signal Lines"
+inDrawSigLongCol   = input.color(color.rgb(0, 255, 170),   "Long Color",         group=groupDrawSignal)
+inDrawSigShortCol  = input.color(color.rgb(255, 90, 180),  "Short Color",        group=groupDrawSignal)
+inDrawSigWaitCol   = input.color(color.rgb(130, 150, 255), "Wait Color",         group=groupDrawSignal)
+inDrawSigStyle     = input.string("Solid",  "Style",   options=["Solid","Dashed","Dotted"], group=groupDrawSignal)
+inDrawSigWidthLow  = input.int(1, "Width (Low Conf)",   minval=1, maxval=6, group=groupDrawSignal)
+inDrawSigWidthMed  = input.int(2, "Width (Med Conf)",   minval=1, maxval=6, group=groupDrawSignal)
+inDrawSigWidthHigh = input.int(3, "Width (High Conf)",  minval=1, maxval=6, group=groupDrawSignal)
+inDrawSigAlphaHigh = input.int(10, "Alpha (High Conf)", minval=0, maxval=90, group=groupDrawSignal)
+inDrawSigAlphaMed  = input.int(35, "Alpha (Med Conf)",  minval=0, maxval=90, group=groupDrawSignal)
+inDrawSigAlphaLow  = input.int(65, "Alpha (Low Conf)",  minval=0, maxval=99, group=groupDrawSignal)
+inDrawStopCol      = input.color(color.rgb(255, 90, 180), "Stop Line Color",     group=groupDrawSignal)
+inDrawTakeCol      = input.color(color.rgb(0, 255, 170),  "Take Line Color",     group=groupDrawSignal)
+inDrawStopStyle    = input.string("Dashed", "Stop/Take Style", options=["Solid","Dashed","Dotted"], group=groupDrawSignal)
+inDrawStopWidth    = input.int(1, "Stop/Take Width", minval=1, maxval=4, group=groupDrawSignal)
+inDrawStopAlpha    = input.int(35, "Stop/Take Alpha", minval=0, maxval=90, group=groupDrawSignal)
+
+groupDrawPivot = "Drawings: Pivot Anchors"
+inDrawPivotStyle = input.string("Solid", "Style", options=["Solid","Dashed","Dotted"], group=groupDrawPivot)
+inDrawPivotWidth = input.int(1, "Width", minval=1, maxval=4, group=groupDrawPivot)
+inDrawPivotAlpha = input.int(35, "Alpha", minval=0, maxval=90, group=groupDrawPivot)
+
+groupDrawFib = "Drawings: Fib Lines"
+inDrawFibStyle  = input.string("Dashed", "Style",  options=["Solid","Dashed","Dotted"], group=groupDrawFib)
+inDrawFibWidth  = input.int(1, "Width",  minval=1, maxval=4, group=groupDrawFib)
+inDrawFibAlpha  = input.int(35, "Alpha", minval=0, maxval=90, group=groupDrawFib)
+
+groupDrawWedge = "Drawings: Wedge Lines"
+inDrawWedgeBullCol  = input.color(color.rgb(0, 255, 170),   "Bull Color",    group=groupDrawWedge)
+inDrawWedgeBearCol  = input.color(color.rgb(255, 90, 180),  "Bear Color",    group=groupDrawWedge)
+inDrawWedgeNeutCol  = input.color(color.rgb(130, 150, 255), "Neutral Color", group=groupDrawWedge)
+inDrawWedgeStyle    = input.string("Solid", "Style",  options=["Solid","Dashed","Dotted"], group=groupDrawWedge)
+inDrawWedgeWidth    = input.int(1, "Width", minval=1, maxval=4, group=groupDrawWedge)
+inDrawWedgeAlpha    = input.int(35, "Alpha", minval=0, maxval=90, group=groupDrawWedge)
+
+groupDrawFork = "Drawings: Pitchfork"
+inDrawForkMedCol    = input.color(color.rgb(160, 200, 255), "Median Color",   group=groupDrawFork)
+inDrawForkMedStyle  = input.string("Dotted", "Median Style",  options=["Solid","Dashed","Dotted"], group=groupDrawFork)
+inDrawForkMedWidth  = input.int(2, "Median Width",  minval=1, maxval=6, group=groupDrawFork)
+inDrawForkMedAlpha  = input.int(35, "Median Alpha", minval=0, maxval=90, group=groupDrawFork)
+inDrawForkChanCol   = input.color(color.rgb(160, 200, 255), "Channel Color",  group=groupDrawFork)
+inDrawForkChanStyle = input.string("Dotted", "Channel Style", options=["Solid","Dashed","Dotted"], group=groupDrawFork)
+inDrawForkChanWidth = input.int(1, "Channel Width", minval=1, maxval=4, group=groupDrawFork)
+inDrawForkChanAlpha = input.int(35, "Channel Alpha", minval=0, maxval=90, group=groupDrawFork)
+inDrawForkFanCol    = input.color(color.rgb(160, 200, 255), "Fan Color",      group=groupDrawFork)
+inDrawForkFanStyle  = input.string("Dotted", "Fan Style",    options=["Solid","Dashed","Dotted"], group=groupDrawFork)
+inDrawForkFanAlpha  = input.int(65, "Fan Alpha",  minval=0, maxval=99, group=groupDrawFork)
+
+groupDrawOB = "Drawings: OB Zones"
+inDrawOBBullCol     = input.color(color.rgb(0, 255, 170),  "Bull Zone Color",  group=groupDrawOB)
+inDrawOBBearCol     = input.color(color.rgb(255, 90, 180), "Bear Zone Color",  group=groupDrawOB)
+inDrawOBBorderStyle = input.string("Solid", "Border Style",  options=["Solid","Dashed","Dotted"], group=groupDrawOB)
+inDrawOBBorderWidth = input.int(2, "Border Width",  minval=1, maxval=6, group=groupDrawOB)
+inDrawOBFillAlpha   = input.int(35, "Fill Alpha",   minval=0, maxval=99, group=groupDrawOB)
+inDrawOBBorderAlpha = input.int(0,  "Border Alpha", minval=0, maxval=90, group=groupDrawOB)
+
+groupDrawFVG = "Drawings: FVG Boxes"
+inDrawFVGFreshCol    = input.color(color.rgb(130, 150, 255), "Fresh Color",   group=groupDrawFVG)
+inDrawFVGPartialCol  = input.color(color.rgb(0, 255, 170),   "Partial Color", group=groupDrawFVG)
+inDrawFVGFilledCol   = input.color(color.rgb(150, 150, 150), "Filled Color",  group=groupDrawFVG)
+inDrawFVGInvalidCol  = input.color(color.rgb(255, 90, 180),  "Invalid Color", group=groupDrawFVG)
+inDrawFVGBoxAlpha    = input.int(82, "Box Fill Alpha",  minval=0, maxval=99, group=groupDrawFVG)
+inDrawFVGBorderStyle = input.string("Solid", "Border Style", options=["Solid","Dashed","Dotted"], group=groupDrawFVG)
+inDrawFVGBorderWidth = input.int(1, "Border Width",  minval=1, maxval=4, group=groupDrawFVG)
+inDrawFVGMidCol      = input.color(color.rgb(130, 150, 255), "Midline Color", group=groupDrawFVG)
+inDrawFVGMidStyle    = input.string("Dashed", "Midline Style", options=["Solid","Dashed","Dotted"], group=groupDrawFVG)
+inDrawFVGMidWidth    = input.int(1, "Midline Width",  minval=1, maxval=4, group=groupDrawFVG)
+inDrawFVGMidAlpha    = input.int(65, "Midline Alpha", minval=0, maxval=99, group=groupDrawFVG)
+
+groupDrawMarkers = "Drawings: Markers"
+inDrawDotBullCol   = input.color(color.rgb(0, 255, 170),   "Bull Cross Dot",  group=groupDrawMarkers)
+inDrawDotBearCol   = input.color(color.rgb(255, 90, 180),  "Bear Cross Dot",  group=groupDrawMarkers)
+inDrawDotAlpha     = input.int(35, "Dot Alpha",    minval=0, maxval=90, group=groupDrawMarkers)
+inDrawBOSCol       = input.color(color.rgb(130, 150, 255), "BOS Marker",      group=groupDrawMarkers)
+inDrawCHOCHCol     = input.color(color.rgb(255, 90, 180),  "CHOCH Marker",    group=groupDrawMarkers)
+inDrawMarkerAlpha  = input.int(35, "Marker Alpha", minval=0, maxval=90, group=groupDrawMarkers)
 
 // ----------------------------------------------------------------------------
 // [C] Utility functions
@@ -184,20 +288,65 @@ fNormRobust(v, center, spread, clampN) =>
 fLineStyle(s) =>
     s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
 
-fColorBull() =>
+fThemeBull() =>
     inTheme == "Nebula" ? color.rgb(0, 255, 170) :
      inTheme == "Monochrome Pro" ? color.rgb(220, 220, 220) :
-     inTheme == "SMC Tactical" ? color.rgb(80, 220, 120) : color.rgb(60, 255, 200)
+     inTheme == "SMC Tactical" ? color.rgb(80, 220, 120) :
+     inTheme == "Neon Dark" ? color.rgb(0, 220, 255) :
+     inTheme == "Earth Tones" ? color.rgb(154, 184, 128) : color.rgb(60, 255, 200)
 
-fColorBear() =>
+fThemeBear() =>
     inTheme == "Nebula" ? color.rgb(255, 90, 180) :
      inTheme == "Monochrome Pro" ? color.rgb(120, 120, 120) :
-     inTheme == "SMC Tactical" ? color.rgb(255, 110, 110) : color.rgb(255, 120, 70)
+     inTheme == "SMC Tactical" ? color.rgb(255, 110, 110) :
+     inTheme == "Neon Dark" ? color.rgb(255, 60, 180) :
+     inTheme == "Earth Tones" ? color.rgb(184, 106, 72) : color.rgb(255, 120, 70)
 
-fColorNeutral() =>
+fThemeNeutral() =>
     inTheme == "Nebula" ? color.rgb(130, 150, 255) :
      inTheme == "Monochrome Pro" ? color.rgb(180, 180, 180) :
-     inTheme == "SMC Tactical" ? color.rgb(180, 200, 120) : color.rgb(140, 170, 255)
+     inTheme == "SMC Tactical" ? color.rgb(180, 200, 120) :
+     inTheme == "Neon Dark" ? color.rgb(170, 170, 255) :
+     inTheme == "Earth Tones" ? color.rgb(186, 168, 132) : color.rgb(140, 170, 255)
+
+fColorBull() =>
+    inUseLinePaletteOverrides ? inLineColBull : fThemeBull()
+
+fColorBear() =>
+    inUseLinePaletteOverrides ? inLineColBear : fThemeBear()
+
+fColorNeutral() =>
+    inUseLinePaletteOverrides ? inLineColNeutral : fThemeNeutral()
+
+fThemeFib() =>
+    inTheme == "Nebula" ? color.rgb(250, 210, 120) :
+     inTheme == "Monochrome Pro" ? color.rgb(200, 200, 200) :
+     inTheme == "SMC Tactical" ? color.rgb(220, 190, 80) :
+     inTheme == "Neon Dark" ? color.rgb(255, 230, 60) :
+     inTheme == "Earth Tones" ? color.rgb(200, 170, 100) : color.rgb(250, 210, 120)
+
+fThemeOB() =>
+    inTheme == "Nebula" ? color.rgb(255, 170, 90) :
+     inTheme == "Monochrome Pro" ? color.rgb(180, 180, 180) :
+     inTheme == "SMC Tactical" ? color.rgb(255, 150, 60) :
+     inTheme == "Neon Dark" ? color.rgb(255, 140, 40) :
+     inTheme == "Earth Tones" ? color.rgb(190, 130, 70) : color.rgb(255, 170, 90)
+
+fThemeFork() =>
+    inTheme == "Nebula" ? color.rgb(160, 200, 255) :
+     inTheme == "Monochrome Pro" ? color.rgb(160, 160, 160) :
+     inTheme == "SMC Tactical" ? color.rgb(100, 180, 220) :
+     inTheme == "Neon Dark" ? color.rgb(80, 200, 255) :
+     inTheme == "Earth Tones" ? color.rgb(130, 170, 200) : color.rgb(160, 200, 255)
+
+fColorFib() =>
+    inUseLinePaletteOverrides ? inLineColFib : fThemeFib()
+
+fColorOB() =>
+    inUseLinePaletteOverrides ? inLineColOB : fThemeOB()
+
+fColorFork() =>
+    inUseLinePaletteOverrides ? inLineColFork : fThemeFork()
 
 fSignalText(s) =>
     s == SIG_LONG ? "LONG" : s == SIG_SHORT ? "SHORT" : "WAIT"
@@ -385,6 +534,8 @@ var fvgBirthArr = array.new_int()
 var fvgStateArr = array.new_int()
 var fvgFillArr = array.new_float()
 var fvgBoxArr = array.new_box()
+var fvgLabelArr = array.new_label()
+var fvgMidLineArr = array.new_line()
 
 var fvgArchTopArr = array.new_float()
 var fvgArchBotArr = array.new_float()
@@ -429,8 +580,10 @@ fRegistryAligned() =>
     szState = array.size(fvgStateArr)
     szFill = array.size(fvgFillArr)
     szBox = array.size(fvgBoxArr)
+    szLbl = array.size(fvgLabelArr)
+    szMid = array.size(fvgMidLineArr)
     
-    sz == szBot and sz == szBull and sz == szBirth and sz == szState and sz == szFill and sz == szBox
+    sz == szBot and sz == szBull and sz == szBirth and sz == szState and sz == szFill and sz == szBox and sz == szLbl and sz == szMid
 
 // ============================================================================
 // [FVG.3] Clear all active boxes and reset arrays
@@ -442,6 +595,12 @@ fClearActiveFVGRegistry() =>
         bx = array.get(fvgBoxArr, i)
         if not na(bx)
             box.delete(bx)
+        lb = array.get(fvgLabelArr, i)
+        if not na(lb)
+            label.delete(lb)
+        ml = array.get(fvgMidLineArr, i)
+        if not na(ml)
+            line.delete(ml)
         i += 1
 
     array.clear(fvgBoxArr)
@@ -451,6 +610,8 @@ fClearActiveFVGRegistry() =>
     array.clear(fvgBirthArr)
     array.clear(fvgStateArr)
     array.clear(fvgFillArr)
+    array.clear(fvgLabelArr)
+    array.clear(fvgMidLineArr)
     0
 
 // ============================================================================
@@ -468,6 +629,12 @@ fAddFVG(_top, _bot, _bull, _birthBar) =>
         array.shift(fvgBirthArr)
         array.shift(fvgStateArr)
         array.shift(fvgFillArr)
+        oldLabel = array.shift(fvgLabelArr)
+        oldMid = array.shift(fvgMidLineArr)
+        if not na(oldLabel)
+            label.delete(oldLabel)
+        if not na(oldMid)
+            line.delete(oldMid)
 
     array.push(fvgTopArr, _top)
     array.push(fvgBotArr, _bot)
@@ -476,6 +643,8 @@ fAddFVG(_top, _bot, _bull, _birthBar) =>
     array.push(fvgStateArr, FVG_FRESH)
     array.push(fvgFillArr, 0.0)
     array.push(fvgBoxArr, na)
+    array.push(fvgLabelArr, na)
+    array.push(fvgMidLineArr, na)
     0
 
 // ============================================================================
@@ -507,14 +676,14 @@ fUpdateFVGRegistryLifecycle() =>
             bull = array.get(fvgBullArr, i)
             birth = array.get(fvgBirthArr, i)
             prevState = array.get(fvgStateArr, i)
-            fill = array.get(fvgFillArr, i)
+            fillRatio = array.get(fvgFillArr, i)
 
             zone = math.max(top - bot, syminfo.mintick)
             touched = low <= top and high >= bot
 
             fillMeasure = bull ? (top - math.max(low, bot)) : (math.min(high, top) - bot)
             fr = fClamp(fSafeDiv(fillMeasure, zone, 1e-6), 0.0, 1.2)
-            fill := math.max(fill, fr)
+            fill = math.max(fillRatio, fr)
 
             expired = (bar_index - birth) > inFVGBoxLife
             invalid = bull ? close < bot : close > top
@@ -554,20 +723,32 @@ fUpdateFVGRegistryRender() =>
             bot = array.get(fvgBotArr, i)
             birth = array.get(fvgBirthArr, i)
             state = array.get(fvgStateArr, i)
+            fill = array.get(fvgFillArr, i)
             bx = array.get(fvgBoxArr, i)
+            lb = array.get(fvgLabelArr, i)
+            ml = array.get(fvgMidLineArr, i)
 
             c = color.gray
             if state == FVG_FRESH
-                c := color.new(fColorNeutral(), 82)
+                c := color.new(inDrawFVGFreshCol, inDrawFVGBoxAlpha)
             else if state == FVG_PARTIAL
-                c := color.new(fColorBull(), 84)
+                c := color.new(inDrawFVGPartialCol, inDrawFVGBoxAlpha)
             else if state == FVG_FILLED
-                c := color.new(color.gray, 88)
+                c := color.new(inDrawFVGFilledCol, inDrawFVGBoxAlpha)
             else if state == FVG_INVALID
-                c := color.new(fColorBear(), 82)
+                c := color.new(inDrawFVGInvalidCol, inDrawFVGBoxAlpha)
 
             if na(bx) and state != FVG_INVALID
-                nb = box.new(left=birth, top=top, right=bar_index, bottom=bot, xloc=xloc.bar_index, bgcolor=c, border_color=color.new(c, 0))
+                nb = box.new(
+                     left=birth,
+                     top=top,
+                     right=bar_index,
+                     bottom=bot,
+                     xloc=xloc.bar_index,
+                     bgcolor=c,
+                     border_color=color.new(c, 0),
+                     border_style=fLineStyle(inDrawFVGBorderStyle),
+                     border_width=inDrawFVGBorderWidth)
                 array.set(fvgBoxArr, i, nb)
             else if not na(bx) and state != FVG_INVALID
                 box.set_right(bx, bar_index)
@@ -575,6 +756,37 @@ fUpdateFVGRegistryRender() =>
                 box.set_bottom(bx, bot)
                 box.set_bgcolor(bx, c)
                 box.set_border_color(bx, color.new(c, 0))
+                box.set_border_style(bx, fLineStyle(inDrawFVGBorderStyle))
+                box.set_border_width(bx, inDrawFVGBorderWidth)
+
+            if inFVGLabelFill and state != FVG_INVALID
+                txt = str.tostring(fill * 100.0, "#.0") + "%"
+                yMid = (top + bot) * 0.5
+                if na(lb)
+                    nlb = label.new(bar_index, yMid, txt, xloc=xloc.bar_index, style=label.style_label_center, textcolor=color.white, color=color.new(color.black, 100), size=size.tiny)
+                    array.set(fvgLabelArr, i, nlb)
+                else
+                    label.set_x(lb, bar_index)
+                    label.set_y(lb, yMid)
+                    label.set_text(lb, txt)
+                    label.set_textcolor(lb, color.white)
+            else if not na(lb)
+                label.delete(lb)
+                array.set(fvgLabelArr, i, na)
+
+            if inFVGShowMidLine and state != FVG_INVALID
+                yMid = (top + bot) * 0.5
+                if na(ml)
+                    nml = line.new(birth, yMid, bar_index, yMid, xloc=xloc.bar_index, extend=extend.none, color=color.new(inDrawFVGMidCol, inDrawFVGMidAlpha), style=fLineStyle(inDrawFVGMidStyle), width=inDrawFVGMidWidth)
+                    array.set(fvgMidLineArr, i, nml)
+                else
+                    line.set_x2(ml, bar_index)
+                    line.set_y1(ml, yMid)
+                    line.set_y2(ml, yMid)
+                    line.set_style(ml, fLineStyle(inDrawFVGMidStyle))
+            else if not na(ml)
+                line.delete(ml)
+                array.set(fvgMidLineArr, i, na)
 
             i += 1
     0
@@ -601,6 +813,12 @@ fCompactInactiveFVGs() =>
                 array.remove(fvgStateArr, i)
                 array.remove(fvgFillArr, i)
                 array.remove(fvgBoxArr, i)
+                lb = array.remove(fvgLabelArr, i)
+                ml = array.remove(fvgMidLineArr, i)
+                if not na(lb)
+                    label.delete(lb)
+                if not na(ml)
+                    line.delete(ml)
 
             i -= 1
     0
@@ -777,6 +995,48 @@ var pivotEvtChochArr = array.new_bool()
 var pivotAnchorLineArr = array.new_line()
 var pivotAnchorLabelArr = array.new_label()
 
+var pivotHighBarHist = array.new_int()
+var pivotHighPriceHist = array.new_float()
+var pivotLowBarHist = array.new_int()
+var pivotLowPriceHist = array.new_float()
+var pivotAltTypeHist = array.new_int()
+var pivotAltBarHist = array.new_int()
+var pivotAltPriceHist = array.new_float()
+
+fPushPivotHistory(_isHigh, _bar, _price) =>
+    if _isHigh
+        array.unshift(pivotHighBarHist, _bar)
+        array.unshift(pivotHighPriceHist, _price)
+        if array.size(pivotHighBarHist) > PIVOT_HISTORY_SIZE
+            array.pop(pivotHighBarHist)
+            array.pop(pivotHighPriceHist)
+    else
+        array.unshift(pivotLowBarHist, _bar)
+        array.unshift(pivotLowPriceHist, _price)
+        if array.size(pivotLowBarHist) > PIVOT_HISTORY_SIZE
+            array.pop(pivotLowBarHist)
+            array.pop(pivotLowPriceHist)
+
+    typ = _isHigh ? 1 : -1
+    if array.size(pivotAltTypeHist) == 0
+        array.unshift(pivotAltTypeHist, typ)
+        array.unshift(pivotAltBarHist, _bar)
+        array.unshift(pivotAltPriceHist, _price)
+    else
+        lastTyp = array.get(pivotAltTypeHist, 0)
+        if lastTyp == typ
+            array.set(pivotAltBarHist, 0, _bar)
+            array.set(pivotAltPriceHist, 0, _price)
+        else
+            array.unshift(pivotAltTypeHist, typ)
+            array.unshift(pivotAltBarHist, _bar)
+            array.unshift(pivotAltPriceHist, _price)
+            if array.size(pivotAltTypeHist) > PIVOT_HISTORY_SIZE
+                array.pop(pivotAltTypeHist)
+                array.pop(pivotAltBarHist)
+                array.pop(pivotAltPriceHist)
+    0
+
 fPushPivotEvent(_bar, _type, _price, _dir, _bos, _choch) =>
     array.unshift(pivotEvtBarArr, _bar)
     array.unshift(pivotEvtTypeArr, _type)
@@ -808,7 +1068,7 @@ fTrimPivotAnchors() =>
 
 fMakePivotAnchor(_bar, _price, _txt, _bull) =>
     if inEnablePivotAnchors and inShowVisual
-        c = _bull ? color.new(fColorBull(), inAlphaMedium) : color.new(fColorBear(), inAlphaMedium)
+        c = _bull ? color.new(fColorBull(), inDrawPivotAlpha) : color.new(fColorBear(), inDrawPivotAlpha)
 
         ln = line.new(
              x1 = _bar,
@@ -818,8 +1078,8 @@ fMakePivotAnchor(_bar, _price, _txt, _bull) =>
              xloc = xloc.bar_index,
              extend = extend.none,
              color = c,
-             style = fLineStyle(inLineStyleSignal),
-             width = inLineThin)
+             style = fLineStyle(inDrawPivotStyle),
+             width = inDrawPivotWidth)
 
         lb = label.new(
              x = _bar,
@@ -862,12 +1122,14 @@ fCapturePivotEvents(_ph, _pl, _bos, _choch, _lastPH, _lastPL, _structureDir) =>
             evtBarPH = bar_index - inPivotRight
             evtTxtPH = _bos ? "PH+BOS" : _choch ? "PH+CHOCH" : "PH"
             fPushPivotEvent(evtBarPH, "PH", _ph, _structureDir, _bos, _choch)
+            fPushPivotHistory(true, evtBarPH, _ph)
             fMakePivotAnchor(evtBarPH, _ph, evtTxtPH, true)
 
         if not na(_pl)
             evtBarPL = bar_index - inPivotRight
             evtTxtPL = _bos ? "PL+BOS" : _choch ? "PL+CHOCH" : "PL"
             fPushPivotEvent(evtBarPL, "PL", _pl, _structureDir, _bos, _choch)
+            fPushPivotHistory(false, evtBarPL, _pl)
             fMakePivotAnchor(evtBarPL, _pl, evtTxtPL, false)
     0
 
@@ -1167,6 +1429,19 @@ fProcessExperiences() =>
 // ----------------------------------------------------------------------------
 var line[] gLines = array.new_line()
 var label[] gLabels = array.new_label()
+var line[] gFibLines = array.new_line()
+var label[] gFibLabels = array.new_label()
+var line[] gWedgeLines = array.new_line()
+var line[] gForkLines = array.new_line()
+var box[] gObBoxes = array.new_box()
+var float[] gObTop = array.new_float()
+var float[] gObBot = array.new_float()
+var bool[] gObBull = array.new_bool()
+var int[] gObBirth = array.new_int()
+var table gLegend = table.new(position.bottom_right, LEGEND_COLS, LEGEND_ROWS, border_width=1)
+
+var int fibKeyA = na
+var int fibKeyB = na
 
 fPruneDraw() =>
     while array.size(gLines) > inDrawBudget
@@ -1175,6 +1450,279 @@ fPruneDraw() =>
     while array.size(gLabels) > inDrawBudget
         lb = array.pop(gLabels)
         label.delete(lb)
+
+fClearLineArray(arr) =>
+    while array.size(arr) > 0
+        ln = array.pop(arr)
+        if not na(ln)
+            line.delete(ln)
+    0
+
+fClearLabelArray(arr) =>
+    while array.size(arr) > 0
+        lb = array.pop(arr)
+        if not na(lb)
+            label.delete(lb)
+    0
+
+fClearBoxArray(arr) =>
+    while array.size(arr) > 0
+        bx = array.pop(arr)
+        if not na(bx)
+            box.delete(bx)
+    0
+
+fFibPrice(_isUp, _lo, _hi, _lvl, _isExt) =>
+    // Ensure a meaningful range for tiny-price instruments and flat pivots.
+    minRng = math.max(math.abs(_hi - _lo) * MIN_FIB_RANGE_PCT, syminfo.mintick * MIN_FIB_TICK_MULT)
+    rng = math.max(_hi - _lo, minRng)
+    _isUp ? (_isExt ? _hi + rng * (_lvl - 1.0) : _hi - rng * _lvl) : (_isExt ? _lo - rng * (_lvl - 1.0) : _lo + rng * _lvl)
+
+fPushFibVisual(_x1, _price, _txt) =>
+    ln = line.new(_x1, _price, bar_index + inWedgeLookAhead, _price, xloc=xloc.bar_index, extend=extend.right, color=color.new(fColorFib(), inDrawFibAlpha), style=fLineStyle(inDrawFibStyle), width=inDrawFibWidth)
+    lb = label.new(bar_index, _price, _txt, xloc=xloc.bar_index, style=label.style_label_left, textcolor=fColorFib(), color=color.new(color.black, 100), size=size.tiny)
+    array.unshift(gFibLines, ln)
+    array.unshift(gFibLabels, lb)
+    while array.size(gFibLabels) > inMaxFibLabels
+        oldLb = array.pop(gFibLabels)
+        oldLn = array.size(gFibLines) > 0 ? array.pop(gFibLines) : na
+        if not na(oldLb)
+            label.delete(oldLb)
+        if not na(oldLn)
+            line.delete(oldLn)
+    0
+
+fUpdateFibVisuals() =>
+    if not inShowVisual or not inShowFibo
+        fClearLineArray(gFibLines)
+        fClearLabelArray(gFibLabels)
+        fibKeyA := na
+        fibKeyB := na
+    else if array.size(pivotHighBarHist) > 0 and array.size(pivotLowBarHist) > 0
+        hBar = array.get(pivotHighBarHist, 0)
+        hPx = array.get(pivotHighPriceHist, 0)
+        lBar = array.get(pivotLowBarHist, 0)
+        lPx = array.get(pivotLowPriceHist, 0)
+        kA = math.min(hBar, lBar)
+        kB = math.max(hBar, lBar)
+        if fibKeyA != kA or fibKeyB != kB
+            fibKeyA := kA
+            fibKeyB := kB
+            fClearLineArray(gFibLines)
+            fClearLabelArray(gFibLabels)
+
+            isUp = lBar < hBar
+            xStart = isUp ? lBar : hBar
+            loPx = math.min(lPx, hPx)
+            hiPx = math.max(lPx, hPx)
+            showRet = inFiboExtMode == "Retracement" or inFiboExtMode == "Both"
+            showExt = inFiboExtMode == "Extension" or inFiboExtMode == "Both"
+
+            if showRet
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 0.236, false), "Fib 0.236")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 0.382, false), "Fib 0.382")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 0.5, false), "Fib 0.500")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 0.618, false), "Fib 0.618")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 0.786, false), "Fib 0.786")
+            if showExt
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 1.0, true), "Ext 1.000")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 1.272, true), "Ext 1.272")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 1.414, true), "Ext 1.414")
+                fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 1.618, true), "Ext 1.618")
+                if inFiboLevels != "Basic"
+                    fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 2.0, true), "Ext 2.000")
+                    fPushFibVisual(xStart, fFibPrice(isUp, loPx, hiPx, 2.618, true), "Ext 2.618")
+    0
+
+fUpdateWedge() =>
+    fClearLineArray(gWedgeLines)
+    if inShowVisual and inShowFibo and array.size(pivotHighBarHist) >= 3 and array.size(pivotLowBarHist) >= 3
+        hB2 = array.get(pivotHighBarHist, 2)
+        hP2 = array.get(pivotHighPriceHist, 2)
+        hB1 = array.get(pivotHighBarHist, 1)
+        hP1 = array.get(pivotHighPriceHist, 1)
+        lB2 = array.get(pivotLowBarHist, 2)
+        lP2 = array.get(pivotLowPriceHist, 2)
+        lB1 = array.get(pivotLowBarHist, 1)
+        lP1 = array.get(pivotLowPriceHist, 1)
+
+        slopeH = fSafeDiv(hP1 - hP2, hB1 - hB2, 1e-6)
+        slopeL = fSafeDiv(lP1 - lP2, lB1 - lB2, 1e-6)
+        iH = hP1 - slopeH * hB1
+        iL = lP1 - slopeL * lB1
+        den = slopeH - slopeL
+        xIntersect = fSafeDiv(iL - iH, den, 1e-6)
+        denThreshold = math.max(EPSILON, (math.abs(slopeH) + math.abs(slopeL)) * 0.0001)
+        isValidWedgeIntersection = math.abs(den) > denThreshold and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
+        if isValidWedgeIntersection
+            x2 = bar_index + inWedgeLookAhead
+            yH2 = hP1 + slopeH * (x2 - hB1)
+            yL2 = lP1 + slopeL * (x2 - lB1)
+            wedgeCol = slopeH > 0 and slopeL > 0 ? color.new(inDrawWedgeBearCol, inDrawWedgeAlpha) : slopeH < 0 and slopeL < 0 ? color.new(inDrawWedgeBullCol, inDrawWedgeAlpha) : color.new(inDrawWedgeNeutCol, inDrawWedgeAlpha)
+            lnH = line.new(hB1, hP1, x2, yH2, xloc=xloc.bar_index, color=wedgeCol, style=fLineStyle(inDrawWedgeStyle), width=inDrawWedgeWidth)
+            lnL = line.new(lB1, lP1, x2, yL2, xloc=xloc.bar_index, color=wedgeCol, style=fLineStyle(inDrawWedgeStyle), width=inDrawWedgeWidth)
+            array.push(gWedgeLines, lnH)
+            array.push(gWedgeLines, lnL)
+    0
+
+fUpdatePitchFork() =>
+    fClearLineArray(gForkLines)
+    if inShowVisual and inShowPitchFork and array.size(pivotAltBarHist) >= 3
+        aBar = array.get(pivotAltBarHist, 2)
+        aPx = array.get(pivotAltPriceHist, 2)
+        bBar = array.get(pivotAltBarHist, 1)
+        bPx = array.get(pivotAltPriceHist, 1)
+        cBar = array.get(pivotAltBarHist, 0)
+        cPx = array.get(pivotAltPriceHist, 0)
+
+        midBar = int((bBar + cBar) / 2)
+        midPx = (bPx + cPx) * 0.5
+        slope = fSafeDiv(midPx - aPx, midBar - aBar, 1e-6)
+        x2 = bar_index + inWedgeLookAhead
+        medY2 = aPx + slope * (x2 - aBar)
+        upY2 = bPx + slope * (x2 - bBar)
+        loY2 = cPx + slope * (x2 - cBar)
+        colMed  = color.new(inDrawForkMedCol,  inDrawForkMedAlpha)
+        colChan = color.new(inDrawForkChanCol, inDrawForkChanAlpha)
+        colFan  = color.new(inDrawForkFanCol,  inDrawForkFanAlpha)
+
+        lMed = line.new(aBar, aPx, x2, medY2, xloc=xloc.bar_index, color=colMed, style=fLineStyle(inDrawForkMedStyle), width=inDrawForkMedWidth)
+        lUp = line.new(bBar, bPx, x2, upY2, xloc=xloc.bar_index, color=colChan, style=fLineStyle(inDrawForkChanStyle), width=inDrawForkChanWidth)
+        lLo = line.new(cBar, cPx, x2, loY2, xloc=xloc.bar_index, color=colChan, style=fLineStyle(inDrawForkChanStyle), width=inDrawForkChanWidth)
+        fanA = line.new(aBar, aPx, bBar, bPx, xloc=xloc.bar_index, extend=extend.right, color=colFan, style=fLineStyle(inDrawForkFanStyle), width=1)
+        fanB = line.new(aBar, aPx, midBar, midPx, xloc=xloc.bar_index, extend=extend.right, color=colFan, style=fLineStyle(inDrawForkFanStyle), width=1)
+        fanC = line.new(aBar, aPx, cBar, cPx, xloc=xloc.bar_index, extend=extend.right, color=colFan, style=fLineStyle(inDrawForkFanStyle), width=1)
+        array.push(gForkLines, lMed)
+        array.push(gForkLines, lUp)
+        array.push(gForkLines, lLo)
+        array.push(gForkLines, fanA)
+        array.push(gForkLines, fanB)
+        array.push(gForkLines, fanC)
+    0
+
+fIsEngulfing(_isBull, _curO, _curC, _prevO, _prevC) =>
+    _isBull ? (_curC > _curO and _prevC < _prevO and _curO <= _prevC and _curC >= _prevO) : (_curC < _curO and _prevC > _prevO and _curO >= _prevC and _curC <= _prevO)
+
+fFindOBZone(_bull) =>
+    found = false
+    outTop = na
+    outBot = na
+    outBar = na
+    for j = 1 to inOBLookback
+        prevO = open[j + 1]
+        prevC = close[j + 1]
+        curO = open[j]
+        curC = close[j]
+        match = fIsEngulfing(_bull, curO, curC, prevO, prevC)
+        if not found and match
+            outTop := math.max(curO, curC)
+            outBot := math.min(curO, curC)
+            outBar := bar_index - j
+            found := true
+    [found, outTop, outBot, outBar]
+
+fClearOBZones() =>
+    fClearBoxArray(gObBoxes)
+    array.clear(gObTop)
+    array.clear(gObBot)
+    array.clear(gObBull)
+    array.clear(gObBirth)
+    0
+
+fAddOBZone(_top, _bot, _bull, _birth) =>
+    while array.size(gObBoxes) >= inMaxOBBoxes
+        oldBx = array.shift(gObBoxes)
+        array.shift(gObTop)
+        array.shift(gObBot)
+        array.shift(gObBull)
+        array.shift(gObBirth)
+        if not na(oldBx)
+            box.delete(oldBx)
+    c = _bull ? inDrawOBBullCol : inDrawOBBearCol
+    bx = box.new(
+         _birth,
+         _top,
+         bar_index,
+         _bot,
+         xloc=xloc.bar_index,
+         bgcolor=color.new(c, inDrawOBFillAlpha),
+         border_color=color.new(c, inDrawOBBorderAlpha),
+         border_style=fLineStyle(inDrawOBBorderStyle),
+         border_width=inDrawOBBorderWidth)
+    array.push(gObBoxes, bx)
+    array.push(gObTop, _top)
+    array.push(gObBot, _bot)
+    array.push(gObBull, _bull)
+    array.push(gObBirth, _birth)
+    0
+
+fUpdateOBZones() =>
+    if not inShowVisual or not inShowOBZones
+        fClearOBZones()
+    else
+        if stObTouch
+            wantBull = stStructureDir >= 0
+            [found, top, bot, bBar] = fFindOBZone(wantBull)
+            if found
+                fAddOBZone(top, bot, wantBull, bBar)
+
+        i = array.size(gObBoxes) - 1
+        while i >= 0
+            bx = array.get(gObBoxes, i)
+            top = array.get(gObTop, i)
+            bot = array.get(gObBot, i)
+            bull = array.get(gObBull, i)
+            invalid = bull ? close < bot : close > top
+            if invalid
+                if not na(bx)
+                    box.delete(bx)
+                array.remove(gObBoxes, i)
+                array.remove(gObTop, i)
+                array.remove(gObBot, i)
+                array.remove(gObBull, i)
+                array.remove(gObBirth, i)
+            else
+                if not na(bx)
+                    box.set_right(bx, bar_index)
+            i -= 1
+    0
+
+fRenderLegend() =>
+    if inShowVisual and inShowLineLegend
+        table.cell(gLegend, 0, 0, "Role", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 0, "Color", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 2, 0, "Style", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 0, 1, "Bull", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 1, "", bgcolor=fColorBull())
+        table.cell(gLegend, 2, 1, inDrawSigStyle, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 0, 2, "Bear", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 2, "", bgcolor=fColorBear())
+        table.cell(gLegend, 2, 2, inDrawSigStyle, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 0, 3, "Neutral", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 3, "", bgcolor=fColorNeutral())
+        table.cell(gLegend, 2, 3, inDrawSigStyle, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 0, 4, "Fib", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 4, "", bgcolor=fColorFib())
+        table.cell(gLegend, 2, 4, inDrawFibStyle, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 0, 5, "OB", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 5, "", bgcolor=fColorOB())
+        table.cell(gLegend, 2, 5, inDrawOBBorderStyle, text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 0, 6, "Fork", text_color=color.white, bgcolor=color.new(color.black, 0))
+        table.cell(gLegend, 1, 6, "", bgcolor=fColorFork())
+        table.cell(gLegend, 2, 6, inDrawForkMedStyle, text_color=color.white, bgcolor=color.new(color.black, 0))
+    else
+        for r = 0 to LEGEND_ROWS - 1
+            for c = 0 to LEGEND_COLS - 1
+                table.cell(gLegend, c, r, "")
+    0
+
+fUpdateAdvancedVisuals() =>
+    fUpdateFibVisuals()
+    fUpdateWedge()
+    fUpdatePitchFork()
+    fUpdateOBZones()
+    fRenderLegend()
+    0
 
 // ----------------------------------------------------------------------------
 // [D] Diagnostics table state
@@ -1275,10 +1823,10 @@ fDrawSignal() =>
     if not inShowVisual
         na
 
-    col = stSignal == SIG_LONG ? fColorBull() : stSignal == SIG_SHORT ? fColorBear() : fColorNeutral()
-    alpha = stConfidence > 0.75 ? inAlphaStrong : stConfidence > 0.55 ? inAlphaMedium : inAlphaSoft
-    width = stConfidence > 0.75 ? inLineBold : stConfidence > 0.55 ? inLineNormal : inLineThin
-    style = fLineStyle(inLineStyleSignal)
+    col = stSignal == SIG_LONG ? inDrawSigLongCol : stSignal == SIG_SHORT ? inDrawSigShortCol : inDrawSigWaitCol
+    alpha = stConfidence > 0.75 ? inDrawSigAlphaHigh : stConfidence > 0.55 ? inDrawSigAlphaMed : inDrawSigAlphaLow
+    width = stConfidence > 0.75 ? inDrawSigWidthHigh : stConfidence > 0.55 ? inDrawSigWidthMed : inDrawSigWidthLow
+    style = fLineStyle(inDrawSigStyle)
 
     y2 = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * 0.5 : stSignal == SIG_SHORT ? close - ta.atr(inAtrLen) * 0.5 : close
     ln = line.new(bar_index, close, bar_index + 1, y2, xloc=xloc.bar_index, extend=extend.none, color=color.new(col, alpha), width=width, style=style)
@@ -1292,8 +1840,8 @@ fDrawSignal() =>
     if stSignal != SIG_WAIT
         stopPx = stSignal == SIG_LONG ? close - ta.atr(inAtrLen) * inRiskStopATR : close + ta.atr(inAtrLen) * inRiskStopATR
         takePx = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * inRiskTakeATR : close - ta.atr(inAtrLen) * inRiskTakeATR
-        lStop = line.new(bar_index, stopPx, bar_index + 1, stopPx, xloc=xloc.bar_index, color=color.new(fColorBear(), 35), style=line.style_dashed, width=1)
-        lTake = line.new(bar_index, takePx, bar_index + 1, takePx, xloc=xloc.bar_index, color=color.new(fColorBull(), 35), style=line.style_dashed, width=1)
+        lStop = line.new(bar_index, stopPx, bar_index + 1, stopPx, xloc=xloc.bar_index, color=color.new(inDrawStopCol, inDrawStopAlpha), style=fLineStyle(inDrawStopStyle), width=inDrawStopWidth)
+        lTake = line.new(bar_index, takePx, bar_index + 1, takePx, xloc=xloc.bar_index, color=color.new(inDrawTakeCol, inDrawStopAlpha), style=fLineStyle(inDrawStopStyle), width=inDrawStopWidth)
         array.unshift(gLines, lStop)
         array.unshift(gLines, lTake)
 
@@ -1421,6 +1969,7 @@ if isReady
 
     // 7) render
     fTableRender()
+    fUpdateAdvancedVisuals()
     fDrawSignal()
 
     if inShowDebug
@@ -1436,3 +1985,24 @@ if isReady
 else
     if barstate.islast
         label.new(bar_index, high, "Warmup " + str.tostring(bar_index) + "/" + str.tostring(inWarmupBars), style=label.style_label_down, textcolor=color.white, color=color.new(color.orange, 65), size=size.tiny)
+
+histStrongPos = isReady and inShowHistogram and not inShowHistogramPane and stFinalScore > 0.66
+histMidPos = isReady and inShowHistogram and not inShowHistogramPane and stFinalScore > 0.33 and stFinalScore <= 0.66
+histWeakPos = isReady and inShowHistogram and not inShowHistogramPane and stFinalScore > 0 and stFinalScore <= 0.33
+histStrongNeg = isReady and inShowHistogram and not inShowHistogramPane and stFinalScore < -0.66
+histMidNeg = isReady and inShowHistogram and not inShowHistogramPane and stFinalScore < -0.33 and stFinalScore >= -0.66
+histWeakNeg = isReady and inShowHistogram and not inShowHistogramPane and stFinalScore < 0 and stFinalScore >= -0.33
+
+plotshape(histStrongPos, style=shape.square, location=location.belowbar, color=color.new(fColorBull(), inHistAlphaStrong), size=size.large, title="HistStrongPos")
+plotshape(histMidPos, style=shape.square, location=location.belowbar, color=color.new(fColorBull(), inHistAlphaMed), size=size.normal, title="HistMidPos")
+plotshape(histWeakPos, style=shape.square, location=location.belowbar, color=color.new(fColorBull(), inHistAlphaSoft), size=size.small, title="HistWeakPos")
+plotshape(histStrongNeg, style=shape.square, location=location.abovebar, color=color.new(fColorBear(), inHistAlphaStrong), size=size.large, title="HistStrongNeg")
+plotshape(histMidNeg, style=shape.square, location=location.abovebar, color=color.new(fColorBear(), inHistAlphaMed), size=size.normal, title="HistMidNeg")
+plotshape(histWeakNeg, style=shape.square, location=location.abovebar, color=color.new(fColorBear(), inHistAlphaSoft), size=size.small, title="HistWeakNeg")
+
+plot(inShowHistogramPane and isReady and inShowHistogram ? stFinalScore : na, title="Score Histogram", style=plot.style_histogram, color=stFinalScore >= 0 ? color.new(fColorBull(), inHistAlphaMed) : color.new(fColorBear(), inHistAlphaMed), linewidth=2)
+
+plotshape(isReady and inShowDots and stCrossSignal == 1, style=shape.circle, location=location.belowbar, color=color.new(inDrawDotBullCol, inDrawDotAlpha), size=size.small, title="WhiteCrossDot")
+plotshape(isReady and inShowDots and stCrossSignal == -1, style=shape.circle, location=location.belowbar, color=color.new(inDrawDotBearCol, inDrawDotAlpha), size=size.small, title="BlackCrossDot")
+plotshape(isReady and inShowCrossMarkers and stBos, style=shape.xcross, location=location.abovebar, color=color.new(inDrawBOSCol, inDrawMarkerAlpha), size=size.tiny, title="BOSCross")
+plotshape(isReady and inShowCrossMarkers and stChoch, style=shape.xcross, location=location.abovebar, color=color.new(inDrawCHOCHCol, inDrawMarkerAlpha), size=size.tiny, title="CHOCHCross")
