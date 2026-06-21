@@ -588,7 +588,7 @@ fUpdateFVGRegistryLifecycle() =>
             bull = array.get(fvgBullArr, i)
             birth = array.get(fvgBirthArr, i)
             prevState = array.get(fvgStateArr, i)
-            fillPercentage = array.get(fvgFillArr, i)
+            fillRatio = array.get(fvgFillArr, i)
 
             zone = math.max(top - bot, syminfo.mintick)
             touched = low <= top and high >= bot
@@ -672,7 +672,7 @@ fUpdateFVGRegistryRender() =>
                 box.set_border_width(bx, inFVGBorderWidth)
 
             if inFVGLabelFill and state != FVG_INVALID
-                txt = str.tostring(fillPercentage * 100.0, "#.0") + "%"
+                txt = str.tostring(fillRatio * 100.0, "#.0") + "%"
                 yMid = (top + bot) * 0.5
                 if na(lb)
                     nlb = label.new(bar_index, yMid, txt, xloc=xloc.bar_index, style=label.style_label_center, textcolor=color.white, color=color.new(color.black, 100), size=size.tiny)
@@ -1386,7 +1386,7 @@ fClearBoxArray(arr) =>
 
 fFibPrice(_isUp, _lo, _hi, _lvl, _isExt) =>
     // Ensure a meaningful range for tiny-price instruments and flat pivots.
-    minRng = math.max(math.abs(_hi) * MIN_FIB_RANGE_PCT, syminfo.mintick * MIN_FIB_TICK_MULT)
+    minRng = math.max(math.abs(_hi - _lo) * MIN_FIB_RANGE_PCT, syminfo.mintick * MIN_FIB_TICK_MULT)
     rng = math.max(_hi - _lo, minRng)
     _isUp ? (_isExt ? _hi + rng * (_lvl - 1.0) : _hi - rng * _lvl) : (_isExt ? _lo - rng * (_lvl - 1.0) : _lo + rng * _lvl)
 
@@ -1464,7 +1464,8 @@ fUpdateWedge() =>
         iL = lP1 - slopeL * lB1
         den = slopeH - slopeL
         xIntersect = fSafeDiv(iL - iH, den, 1e-6)
-        isValidWedgeIntersection = math.abs(den) > EPSILON and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
+        denThreshold = math.max(EPSILON, (math.abs(slopeH) + math.abs(slopeL)) * 0.0001)
+        isValidWedgeIntersection = math.abs(den) > denThreshold and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
         if isValidWedgeIntersection
             x2 = bar_index + inWedgeLookAhead
             yH2 = hP1 + slopeH * (x2 - hB1)
@@ -1486,7 +1487,7 @@ fUpdatePitchFork() =>
         cBar = array.get(pivotAltBarHist, 0)
         cPx = array.get(pivotAltPriceHist, 0)
 
-        midBar = int(math.round((bBar + cBar) * 0.5))
+        midBar = int((bBar + cBar) / 2)
         midPx = (bPx + cPx) * 0.5
         slope = fSafeDiv(midPx - aPx, midBar - aBar, 1e-6)
         x2 = bar_index + inWedgeLookAhead
