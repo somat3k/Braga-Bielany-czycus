@@ -2008,3 +2008,43 @@ plotshape(isReady and inShowDots and stCrossSignal == 1, style=shape.circle, loc
 plotshape(isReady and inShowDots and stCrossSignal == -1, style=shape.circle, location=location.belowbar, color=color.new(inDrawDotBearCol, inDrawDotAlpha), size=size.small, title="BlackCrossDot")
 plotshape(isReady and inShowCrossMarkers and stBos, style=shape.xcross, location=location.abovebar, color=color.new(inDrawBOSCol, inDrawMarkerAlpha), size=size.tiny, title="BOSCross")
 plotshape(isReady and inShowCrossMarkers and stChoch, style=shape.xcross, location=location.abovebar, color=color.new(inDrawCHOCHCol, inDrawMarkerAlpha), size=size.tiny, title="CHOCHCross")
+
+// ============================================================================
+// [G] Indicator overlay lines, signal arrows and score meters
+// ============================================================================
+
+// ── EMA Pack overlay (price scale)
+_maOn = inShowVisual and inEnableMAPack
+plot(_maOn ? ta.ema(close, 20)  : na, title="EMA 20",  color=color.new(fColorBull(),    45), linewidth=1)
+plot(_maOn ? ta.ema(close, 50)  : na, title="EMA 50",  color=color.new(fColorNeutral(), 45), linewidth=1)
+plot(_maOn ? ta.ema(close, 200) : na, title="EMA 200", color=color.new(fColorBear(),    30), linewidth=2)
+
+// ── VWAP overlay (price scale)
+plot(inShowVisual and inEnableVWAP ? ta.vwap(hlc3) : na,
+     title="VWAP", color=color.new(color.aqua, 35), linewidth=1)
+
+// ── VIDYA overlay (price scale; stVidya is kept current by the main loop)
+plot(inShowVisual and inEnableVIDYA ? stVidya : na,
+     title="VIDYA", color=color.new(color.yellow, 35), linewidth=1)
+
+// ── Cross-EMA overlay lines (price scale)
+_crossOn = inShowVisual and (inEnableBlackCross or inEnableWhiteCross)
+plot(_crossOn ? ta.ema(close, inCrossFastLen) : na, title="Cross EMA Fast", color=color.new(fColorBull(), 60), linewidth=1)
+plot(_crossOn ? ta.ema(close, inCrossSlowLen) : na, title="Cross EMA Slow", color=color.new(fColorBear(), 60), linewidth=1)
+
+// ── Signal triangle arrows (standard plotshape above/below bars)
+plotshape(isReady and inShowVisual and stSignal == SIG_LONG,
+     title="LONG Arrow", style=shape.triangleup, location=location.belowbar,
+     color=color.new(inDrawSigLongCol, inDrawSigAlphaHigh), size=size.small)
+plotshape(isReady and inShowVisual and stSignal == SIG_SHORT,
+     title="SHORT Arrow", style=shape.triangledown, location=location.abovebar,
+     color=color.new(inDrawSigShortCol, inDrawSigAlphaHigh), size=size.small)
+
+// ── Confidence and conflict meters (companion to Score Histogram; shown when inShowHistogramPane is on)
+_metersOn = isReady and inShowHistogramPane and inShowHistogram
+plot(_metersOn ? stConfidence : na,
+     title="Confidence Meter", style=plot.style_line,
+     color=color.new(color.white, 40), linewidth=1)
+plot(_metersOn ? stConflict : na,
+     title="Conflict Meter", style=plot.style_line,
+     color=color.new(color.orange, 40), linewidth=1)
