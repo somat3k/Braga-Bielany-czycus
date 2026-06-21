@@ -39,6 +39,11 @@ const int FVG_INVALID = 4
 
 const float CONFLICT_HIGH = 0.66
 const float CONFLICT_MED  = 0.33
+const int PIVOT_HISTORY_SIZE = 12
+const int LEGEND_COLS = 3
+const int LEGEND_ROWS = 7
+const int OB_BOX_ALPHA = 35
+const float MIN_FIB_RANGE_PCT = 0.0001
 
 // ----------------------------------------------------------------------------
 // [B] Inputs
@@ -581,7 +586,7 @@ fUpdateFVGRegistryLifecycle() =>
             bull = array.get(fvgBullArr, i)
             birth = array.get(fvgBirthArr, i)
             prevState = array.get(fvgStateArr, i)
-            fill = array.get(fvgFillArr, i)
+            fillPct = array.get(fvgFillArr, i)
 
             zone = math.max(top - bot, syminfo.mintick)
             touched = low <= top and high >= bot
@@ -656,7 +661,7 @@ fUpdateFVGRegistryRender() =>
                 box.set_border_width(bx, inFVGBorderWidth)
 
             if inFVGLabelFill and state != FVG_INVALID
-                txt = str.tostring(fill * 100.0, "#.0") + "%"
+                txt = str.tostring(fillPct * 100.0, "#.0") + "%"
                 yMid = (top + bot) * 0.5
                 if na(lb)
                     nlb = label.new(bar_index, yMid, txt, xloc=xloc.bar_index, style=label.style_label_center, textcolor=color.white, color=color.new(color.black, 100), size=size.tiny)
@@ -903,13 +908,13 @@ fPushPivotHistory(_isHigh, _bar, _price) =>
     if _isHigh
         array.unshift(pivotHighBarHist, _bar)
         array.unshift(pivotHighPriceHist, _price)
-        if array.size(pivotHighBarHist) > 12
+        if array.size(pivotHighBarHist) > PIVOT_HISTORY_SIZE
             array.pop(pivotHighBarHist)
             array.pop(pivotHighPriceHist)
     else
         array.unshift(pivotLowBarHist, _bar)
         array.unshift(pivotLowPriceHist, _price)
-        if array.size(pivotLowBarHist) > 12
+        if array.size(pivotLowBarHist) > PIVOT_HISTORY_SIZE
             array.pop(pivotLowBarHist)
             array.pop(pivotLowPriceHist)
 
@@ -927,7 +932,7 @@ fPushPivotHistory(_isHigh, _bar, _price) =>
             array.unshift(pivotAltTypeHist, typ)
             array.unshift(pivotAltBarHist, _bar)
             array.unshift(pivotAltPriceHist, _price)
-            if array.size(pivotAltTypeHist) > 12
+            if array.size(pivotAltTypeHist) > PIVOT_HISTORY_SIZE
                 array.pop(pivotAltTypeHist)
                 array.pop(pivotAltBarHist)
                 array.pop(pivotAltPriceHist)
@@ -1334,7 +1339,7 @@ var float[] gObTop = array.new_float()
 var float[] gObBot = array.new_float()
 var bool[] gObBull = array.new_bool()
 var int[] gObBirth = array.new_int()
-var table gLegend = table.new(position.bottom_right, 3, 7, border_width=1)
+var table gLegend = table.new(position.bottom_right, LEGEND_COLS, LEGEND_ROWS, border_width=1)
 
 var int fibKeyA = na
 var int fibKeyB = na
@@ -1369,7 +1374,8 @@ fClearBoxArray(arr) =>
     0
 
 fFibPrice(_isUp, _lo, _hi, _lvl, _isExt) =>
-    rng = math.max(_hi - _lo, syminfo.mintick)
+    minRng = math.max(math.abs(_hi) * MIN_FIB_RANGE_PCT, syminfo.mintick * 10.0)
+    rng = math.max(_hi - _lo, minRng)
     _isUp ? (_isExt ? _hi + rng * (_lvl - 1.0) : _hi - rng * _lvl) : (_isExt ? _lo - rng * (_lvl - 1.0) : _lo + rng * _lvl)
 
 fPushFibVisual(_x1, _price, _txt) =>
@@ -1444,8 +1450,9 @@ fUpdateWedge() =>
         slopeL = fSafeDiv(lP1 - lP2, lB1 - lB2, 1e-6)
         iH = hP1 - slopeH * hB1
         iL = lP1 - slopeL * lB1
-        xIntersect = fSafeDiv(iL - iH, slopeH - slopeL, 1e-6)
-        if xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
+        den = slopeH - slopeL
+        xIntersect = fSafeDiv(iL - iH, den, 1e-6)
+        if math.abs(den) > 1e-6 and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
             x2 = bar_index + inWedgeLookAhead
             yH2 = hP1 + slopeH * (x2 - hB1)
             yL2 = lP1 + slopeL * (x2 - lB1)
@@ -1489,6 +1496,9 @@ fUpdatePitchFork() =>
         array.push(gForkLines, fanC)
     0
 
+fIsEngulfing(_isBull, _curO, _curC, _prevO, _prevC) =>
+    _isBull ? (_curC > _curO and _prevC < _prevO and _curO <= _prevC and _curC >= _prevO) : (_curC < _curO and _prevC > _prevO and _curO >= _prevC and _curC <= _prevO)
+
 fFindOBZone(_bull) =>
     found = false
     outTop = na
@@ -1499,9 +1509,7 @@ fFindOBZone(_bull) =>
         prevC = close[j + 1]
         curO = open[j]
         curC = close[j]
-        bullEngulf = curC > curO and prevC < prevO and curO <= prevC and curC >= prevO
-        bearEngulf = curC < curO and prevC > prevO and curO >= prevC and curC <= prevO
-        match = _bull ? bullEngulf : bearEngulf
+        match = fIsEngulfing(_bull, curO, curC, prevO, prevC)
         if not found and match
             outTop := math.max(curO, curC)
             outBot := math.min(curO, curC)
@@ -1527,7 +1535,7 @@ fAddOBZone(_top, _bot, _bull, _birth) =>
         if not na(oldBx)
             box.delete(oldBx)
     c = color.new(_bull ? fColorBull() : fColorOB(), inAlphaMedium)
-    bx = box.new(_birth, _top, bar_index, _bot, xloc=xloc.bar_index, bgcolor=color.new(c, 35), border_color=c, border_style=fLineStyle(inLineStyleOB), border_width=inLineNormal)
+    bx = box.new(_birth, _top, bar_index, _bot, xloc=xloc.bar_index, bgcolor=color.new(c, OB_BOX_ALPHA), border_color=c, border_style=fLineStyle(inLineStyleOB), border_width=inLineNormal)
     array.push(gObBoxes, bx)
     array.push(gObTop, _top)
     array.push(gObBot, _bot)
@@ -1590,8 +1598,8 @@ fRenderLegend() =>
         table.cell(gLegend, 1, 6, "", bgcolor=fColorFork())
         table.cell(gLegend, 2, 6, inLineStyleFork, text_color=color.white, bgcolor=color.new(color.black, 0))
     else
-        for r = 0 to 6
-            for c = 0 to 2
+        for r = 0 to LEGEND_ROWS - 1
+            for c = 0 to LEGEND_COLS - 1
                 table.cell(gLegend, c, r, "")
     0
 
