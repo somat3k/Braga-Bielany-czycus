@@ -251,14 +251,35 @@ fColorBear() =>
 fColorNeutral() =>
     inUseLinePaletteOverrides ? inLineColNeutral : fThemeNeutral()
 
+fThemeFib() =>
+    inTheme == "Nebula" ? color.rgb(250, 210, 120) :
+     inTheme == "Monochrome Pro" ? color.rgb(200, 200, 200) :
+     inTheme == "SMC Tactical" ? color.rgb(220, 190, 80) :
+     inTheme == "Neon Dark" ? color.rgb(255, 230, 60) :
+     inTheme == "Earth Tones" ? color.rgb(200, 170, 100) : color.rgb(250, 210, 120)
+
+fThemeOB() =>
+    inTheme == "Nebula" ? color.rgb(255, 170, 90) :
+     inTheme == "Monochrome Pro" ? color.rgb(180, 180, 180) :
+     inTheme == "SMC Tactical" ? color.rgb(255, 150, 60) :
+     inTheme == "Neon Dark" ? color.rgb(255, 140, 40) :
+     inTheme == "Earth Tones" ? color.rgb(190, 130, 70) : color.rgb(255, 170, 90)
+
+fThemeFork() =>
+    inTheme == "Nebula" ? color.rgb(160, 200, 255) :
+     inTheme == "Monochrome Pro" ? color.rgb(160, 160, 160) :
+     inTheme == "SMC Tactical" ? color.rgb(100, 180, 220) :
+     inTheme == "Neon Dark" ? color.rgb(80, 200, 255) :
+     inTheme == "Earth Tones" ? color.rgb(130, 170, 200) : color.rgb(160, 200, 255)
+
 fColorFib() =>
-    inLineColFib
+    inUseLinePaletteOverrides ? inLineColFib : fThemeFib()
 
 fColorOB() =>
-    inLineColOB
+    inUseLinePaletteOverrides ? inLineColOB : fThemeOB()
 
 fColorFork() =>
-    inLineColFork
+    inUseLinePaletteOverrides ? inLineColFork : fThemeFork()
 
 fSignalText(s) =>
     s == SIG_LONG ? "LONG" : s == SIG_SHORT ? "SHORT" : "WAIT"
@@ -595,7 +616,7 @@ fUpdateFVGRegistryLifecycle() =>
 
             fillMeasure = bull ? (top - math.max(low, bot)) : (math.min(high, top) - bot)
             fr = fClamp(fSafeDiv(fillMeasure, zone, 1e-6), 0.0, 1.2)
-            fill := math.max(fill, fr)
+            fill = math.max(fillRatio, fr)
 
             expired = (bar_index - birth) > inFVGBoxLife
             invalid = bull ? close < bot : close > top
@@ -672,7 +693,7 @@ fUpdateFVGRegistryRender() =>
                 box.set_border_width(bx, inFVGBorderWidth)
 
             if inFVGLabelFill and state != FVG_INVALID
-                txt = str.tostring(fillRatio * 100.0, "#.0") + "%"
+                txt = str.tostring(fill * 100.0, "#.0") + "%"
                 yMid = (top + bot) * 0.5
                 if na(lb)
                     nlb = label.new(bar_index, yMid, txt, xloc=xloc.bar_index, style=label.style_label_center, textcolor=color.white, color=color.new(color.black, 100), size=size.tiny)
