@@ -1,8 +1,8 @@
 # Memory
 used_memory:1011688
 used_memory_human:987.98K
-used_memory_rss:13131776
-used_memory_rss_human:12.52M
+used_memory_rss:13254656
+used_memory_rss_human:12.64M
 used_memory_peak:1011688
 used_memory_peak_human:987.98K
 used_memory_peak_perc:100.02%
@@ -14,7 +14,7 @@ allocator_allocated:1809696
 allocator_active:1994752
 allocator_resident:5140480
 allocator_muzzy:0
-total_system_memory:16765382656
+total_system_memory:16766423040
 total_system_memory_human:15.61G
 used_memory_lua:32768
 used_memory_vm_eval:32768
@@ -36,10 +36,10 @@ allocator_frag_ratio:1.08
 allocator_frag_bytes:109024
 allocator_rss_ratio:2.58
 allocator_rss_bytes:3145728
-rss_overhead_ratio:2.55
-rss_overhead_bytes:7991296
-mem_fragmentation_ratio:13.49
-mem_fragmentation_bytes:12158472
+rss_overhead_ratio:2.58
+rss_overhead_bytes:8114176
+mem_fragmentation_ratio:13.62
+mem_fragmentation_bytes:12281352
 mem_not_counted_for_evict:0
 mem_replication_backlog:0
 mem_total_replication_buffers:0
