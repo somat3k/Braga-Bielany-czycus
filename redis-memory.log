@@ -1,13 +1,13 @@
 # Memory
-used_memory:1011784
-used_memory_human:988.07K
-used_memory_rss:13307904
-used_memory_rss_human:12.69M
-used_memory_peak:1011784
-used_memory_peak_human:988.07K
+used_memory:1011624
+used_memory_human:987.91K
+used_memory_rss:13275136
+used_memory_rss_human:12.66M
+used_memory_peak:1011624
+used_memory_peak_human:987.91K
 used_memory_peak_perc:100.02%
-used_memory_overhead:948744
-used_memory_startup:948552
+used_memory_overhead:948584
+used_memory_startup:948392
 used_memory_dataset:63040
 used_memory_dataset_perc:99.70%
 allocator_allocated:1809696
@@ -36,10 +36,10 @@ allocator_frag_ratio:1.08
 allocator_frag_bytes:109024
 allocator_rss_ratio:2.58
 allocator_rss_bytes:3145728
-rss_overhead_ratio:2.59
-rss_overhead_bytes:8167424
-mem_fragmentation_ratio:13.67
-mem_fragmentation_bytes:12334504
+rss_overhead_ratio:2.58
+rss_overhead_bytes:8134656
+mem_fragmentation_ratio:13.64
+mem_fragmentation_bytes:12301896
 mem_not_counted_for_evict:0
 mem_replication_backlog:0
 mem_total_replication_buffers:0
