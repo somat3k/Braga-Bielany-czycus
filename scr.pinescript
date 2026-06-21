@@ -44,6 +44,8 @@ const int LEGEND_COLS = 3
 const int LEGEND_ROWS = 7
 const int OB_BOX_ALPHA = 35
 const float MIN_FIB_RANGE_PCT = 0.0001
+const float MIN_FIB_TICK_MULT = 10.0
+const float EPSILON = 1e-6
 
 // ----------------------------------------------------------------------------
 // [B] Inputs
@@ -649,7 +651,16 @@ fUpdateFVGRegistryRender() =>
                 c := color.new(fColorBear(), 82)
 
             if na(bx) and state != FVG_INVALID
-                nb = box.new(left=birth, top=top, right=bar_index, bottom=bot, xloc=xloc.bar_index, bgcolor=c, border_color=color.new(c, 0), border_style=fLineStyle(inFVGBorderStyle), border_width=inFVGBorderWidth)
+                nb = box.new(
+                     left=birth,
+                     top=top,
+                     right=bar_index,
+                     bottom=bot,
+                     xloc=xloc.bar_index,
+                     bgcolor=c,
+                     border_color=color.new(c, 0),
+                     border_style=fLineStyle(inFVGBorderStyle),
+                     border_width=inFVGBorderWidth)
                 array.set(fvgBoxArr, i, nb)
             else if not na(bx) and state != FVG_INVALID
                 box.set_right(bx, bar_index)
@@ -1374,7 +1385,7 @@ fClearBoxArray(arr) =>
     0
 
 fFibPrice(_isUp, _lo, _hi, _lvl, _isExt) =>
-    minRng = math.max(math.abs(_hi) * MIN_FIB_RANGE_PCT, syminfo.mintick * 10.0)
+    minRng = math.max(math.abs(_hi) * MIN_FIB_RANGE_PCT, syminfo.mintick * MIN_FIB_TICK_MULT)
     rng = math.max(_hi - _lo, minRng)
     _isUp ? (_isExt ? _hi + rng * (_lvl - 1.0) : _hi - rng * _lvl) : (_isExt ? _lo - rng * (_lvl - 1.0) : _lo + rng * _lvl)
 
@@ -1452,7 +1463,7 @@ fUpdateWedge() =>
         iL = lP1 - slopeL * lB1
         den = slopeH - slopeL
         xIntersect = fSafeDiv(iL - iH, den, 1e-6)
-        if math.abs(den) > 1e-6 and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
+        if math.abs(den) > EPSILON and xIntersect > bar_index and xIntersect < bar_index + inWedgeLookAhead
             x2 = bar_index + inWedgeLookAhead
             yH2 = hP1 + slopeH * (x2 - hB1)
             yL2 = lP1 + slopeL * (x2 - lB1)
@@ -1535,7 +1546,16 @@ fAddOBZone(_top, _bot, _bull, _birth) =>
         if not na(oldBx)
             box.delete(oldBx)
     c = color.new(_bull ? fColorBull() : fColorOB(), inAlphaMedium)
-    bx = box.new(_birth, _top, bar_index, _bot, xloc=xloc.bar_index, bgcolor=color.new(c, OB_BOX_ALPHA), border_color=c, border_style=fLineStyle(inLineStyleOB), border_width=inLineNormal)
+    bx = box.new(
+         _birth,
+         _top,
+         bar_index,
+         _bot,
+         xloc=xloc.bar_index,
+         bgcolor=color.new(c, OB_BOX_ALPHA),
+         border_color=c,
+         border_style=fLineStyle(inLineStyleOB),
+         border_width=inLineNormal)
     array.push(gObBoxes, bx)
     array.push(gObTop, _top)
     array.push(gObBot, _bot)
