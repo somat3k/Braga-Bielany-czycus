@@ -370,43 +370,98 @@ fUpdateRel(oldRel, hit) =>
 fRelFactor(rel) =>
     // maps reliability [0..1] to [minFactor..maxFactor]
     inRelMinWeightFactor + (inRelMaxWeightFactor - inRelMinWeightFactor) * rel
-
+// Syntax error at input "end of line without line continuation"(CE10156)
 fRelSummary() =>
-    "T:" + str.tostring(relTrend, "#.##") +
-    " M:" + str.tostring(relMomentum, "#.##") +
-    " S:" + str.tostring(relSmc, "#.##")
+    "T:" + str.tostring(relTrend, "#.##") + " M:" + str.tostring(relMomentum, "#.##") + " S:" + str.tostring(relSmc, "#.##")
 
-// ----------------------------------------------------------------------------
-// [C] Multi-FVG registry (active + archive)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// [FVG] Multi-Registry Module (Production Safe)
+// ============================================================================
+
 var fvgTopArr = array.new_float()
 var fvgBotArr = array.new_float()
 var fvgBullArr = array.new_bool()
 var fvgBirthArr = array.new_int()
-var fvgStateArr = array.new_int()      // FVG_* constants
+var fvgStateArr = array.new_int()
 var fvgFillArr = array.new_float()
 var fvgBoxArr = array.new_box()
 
-// Optional archive registry (for diagnostics)
 var fvgArchTopArr = array.new_float()
 var fvgArchBotArr = array.new_float()
 var fvgArchStateArr = array.new_int()
 var fvgArchBirthArr = array.new_int()
 var fvgArchCloseArr = array.new_int()
 
-fArchiveFVG(i) =>
-    array.push(fvgArchTopArr, array.get(fvgTopArr, i))
-    array.push(fvgArchBotArr, array.get(fvgBotArr, i))
-    array.push(fvgArchStateArr, array.get(fvgStateArr, i))
-    array.push(fvgArchBirthArr, array.get(fvgBirthArr, i))
-    array.push(fvgArchCloseArr, bar_index)
+// ============================================================================
+// [FVG.1] Archive helper
+// ============================================================================
+const int FVG_ARCHIVE_MAX = 5000
 
+fArchivePushFloat(arr, v, maxN) =>
+    array.push(arr, v)
+    if array.size(arr) > maxN
+        array.shift(arr)
+    0
+
+fArchivePushInt(arr, v, maxN) =>
+    array.push(arr, v)
+    if array.size(arr) > maxN
+        array.shift(arr)
+    0
+
+fArchiveFVG(i) =>
+    if i >= 0 and i < array.size(fvgTopArr)
+        fArchivePushFloat(fvgArchTopArr, array.get(fvgTopArr, i), FVG_ARCHIVE_MAX)
+        fArchivePushFloat(fvgArchBotArr, array.get(fvgBotArr, i), FVG_ARCHIVE_MAX)
+        fArchivePushInt(fvgArchStateArr, array.get(fvgStateArr, i), FVG_ARCHIVE_MAX)
+        fArchivePushInt(fvgArchBirthArr, array.get(fvgBirthArr, i), FVG_ARCHIVE_MAX)
+        fArchivePushInt(fvgArchCloseArr, bar_index, FVG_ARCHIVE_MAX)
+    0
+
+// ============================================================================
+// [FVG.2] Registry alignment check
+// ============================================================================
+fRegistryAligned() =>
+    sz = array.size(fvgTopArr)
+    szBot = array.size(fvgBotArr)
+    szBull = array.size(fvgBullArr)
+    szBirth = array.size(fvgBirthArr)
+    szState = array.size(fvgStateArr)
+    szFill = array.size(fvgFillArr)
+    szBox = array.size(fvgBoxArr)
+    
+    sz == szBot and sz == szBull and sz == szBirth and sz == szState and sz == szFill and sz == szBox
+
+// ============================================================================
+// [FVG.3] Clear all active boxes and reset arrays
+// ============================================================================
+fClearActiveFVGRegistry() =>
+    cnt = array.size(fvgBoxArr)
+    i = 0
+    while i < cnt
+        bx = array.get(fvgBoxArr, i)
+        if not na(bx)
+            box.delete(bx)
+        i += 1
+
+    array.clear(fvgBoxArr)
+    array.clear(fvgTopArr)
+    array.clear(fvgBotArr)
+    array.clear(fvgBullArr)
+    array.clear(fvgBirthArr)
+    array.clear(fvgStateArr)
+    array.clear(fvgFillArr)
+    0
+
+// ============================================================================
+// [FVG.4] Add new FVG to registry (bounded by inMaxFVG)
+// ============================================================================
 fAddFVG(_top, _bot, _bull, _birthBar) =>
-    // bounded active registry
     if array.size(fvgTopArr) >= inMaxFVG
         oldBox = array.shift(fvgBoxArr)
         if not na(oldBox)
             box.delete(oldBox)
+
         array.shift(fvgTopArr)
         array.shift(fvgBotArr)
         array.shift(fvgBullArr)
@@ -421,40 +476,38 @@ fAddFVG(_top, _bot, _bull, _birthBar) =>
     array.push(fvgStateArr, FVG_FRESH)
     array.push(fvgFillArr, 0.0)
     array.push(fvgBoxArr, na)
+    0
 
-fUpdateFVGRegistry() =>
-    if not inEnableMultiFVG or not inEnableFVG
-        // hard clear active boxes only
-        for i = 0 to array.size(fvgBoxArr) - 1
-            bx = array.get(fvgBoxArr, i)
-            if not na(bx)
-                box.delete(bx)
-        array.clear(fvgBoxArr)
-        array.clear(fvgTopArr)
-        array.clear(fvgBotArr)
-        array.clear(fvgBullArr)
-        array.clear(fvgBirthArr)
-        array.clear(fvgStateArr)
-        array.clear(fvgFillArr)
-    else
-        // 1) detect new FVG per bar
+// ============================================================================
+// [FVG.5] Detect new FVGs this bar
+// ============================================================================
+fUpdateFVGRegistryDetect() =>
+    if inEnableFVG
         newBull = low > high[2]
         newBear = high < low[2]
 
         if newBull
             fAddFVG(low, high[2], true, bar_index)
+
         if newBear
             fAddFVG(low[2], high, false, bar_index)
+    0
 
-        // 2) lifecycle update
-        for i = 0 to array.size(fvgTopArr) - 1
+// ============================================================================
+// [FVG.6] Update lifecycle (fill%, state transition)
+// ============================================================================
+fUpdateFVGRegistryLifecycle() =>
+    cnt = array.size(fvgTopArr)
+
+    if cnt > 0
+        i = 0
+        while i < cnt
             top = array.get(fvgTopArr, i)
             bot = array.get(fvgBotArr, i)
             bull = array.get(fvgBullArr, i)
             birth = array.get(fvgBirthArr, i)
-            state = array.get(fvgStateArr, i)
+            prevState = array.get(fvgStateArr, i)
             fill = array.get(fvgFillArr, i)
-            bx = array.get(fvgBoxArr, i)
 
             zone = math.max(top - bot, syminfo.mintick)
             touched = low <= top and high >= bot
@@ -467,120 +520,141 @@ fUpdateFVGRegistry() =>
             invalid = bull ? close < bot : close > top
             filled = fill >= 0.95
 
-            state := invalid ? FVG_INVALID : filled ? FVG_FILLED : touched ? FVG_PARTIAL : FVG_FRESH
+            newState = prevState
+            if invalid or expired
+                newState := FVG_INVALID
+            else if filled
+                newState := FVG_FILLED
+            else if touched
+                newState := FVG_PARTIAL
+            else
+                newState := FVG_FRESH
 
             array.set(fvgFillArr, i, fill)
-            array.set(fvgStateArr, i, state)
+            array.set(fvgStateArr, i, newState)
 
-            // optional box drawing
-            if inEnableFVGBoxes and inShowVisual
-                c = state == FVG_FRESH ? color.new(fColorNeutral(), 82) :
-                    state == FVG_PARTIAL ? color.new(fColorBull(), 84) :
-                    state == FVG_FILLED ? color.new(color.gray, 88) :
-                    color.new(fColorBear(), 82)
+            wasActive = prevState == FVG_FRESH or prevState == FVG_PARTIAL
+            nowTerminal = newState == FVG_INVALID or newState == FVG_FILLED
 
-                if na(bx)
-                    nb = box.new(left=birth, top=top, right=bar_index, bottom=bot, xloc=xloc.bar_index, bgcolor=c, border_color=color.new(c, 0))
-                    array.set(fvgBoxArr, i, nb)
-                else
-                    box.set_right(bx, bar_index)
-                    box.set_top(bx, top)
-                    box.set_bottom(bx, bot)
-                    box.set_bgcolor(bx, c)
-                    box.set_border_color(bx, color.new(c, 0))
-
-            // Archive + disable expired/closed
-            if expired or state == FVG_INVALID or state == FVG_FILLED
+            if wasActive and nowTerminal
                 fArchiveFVG(i)
+
+            i += 1
+    0
+// ============================================================================
+// [FVG.7] Render boxes (if enabled)
+// ============================================================================
+fUpdateFVGRegistryRender() =>
+    cnt = array.size(fvgTopArr)
+
+    if cnt > 0 and inEnableFVGBoxes and inShowVisual
+        i = 0
+        while i < cnt
+            top = array.get(fvgTopArr, i)
+            bot = array.get(fvgBotArr, i)
+            birth = array.get(fvgBirthArr, i)
+            state = array.get(fvgStateArr, i)
+            bx = array.get(fvgBoxArr, i)
+
+            c = color.gray
+            if state == FVG_FRESH
+                c := color.new(fColorNeutral(), 82)
+            else if state == FVG_PARTIAL
+                c := color.new(fColorBull(), 84)
+            else if state == FVG_FILLED
+                c := color.new(color.gray, 88)
+            else if state == FVG_INVALID
+                c := color.new(fColorBear(), 82)
+
+            if na(bx) and state != FVG_INVALID
+                nb = box.new(left=birth, top=top, right=bar_index, bottom=bot, xloc=xloc.bar_index, bgcolor=c, border_color=color.new(c, 0))
+                array.set(fvgBoxArr, i, nb)
+            else if not na(bx) and state != FVG_INVALID
+                box.set_right(bx, bar_index)
+                box.set_top(bx, top)
+                box.set_bottom(bx, bot)
+                box.set_bgcolor(bx, c)
+                box.set_border_color(bx, color.new(c, 0))
+
+            i += 1
+    0
+
+// ============================================================================
+// [FVG.8] Compact: remove inactive entries (reverse iteration)
+// ============================================================================
+fCompactInactiveFVGs() =>
+    cnt = array.size(fvgTopArr)
+
+    if cnt > 0
+        i = cnt - 1
+        while i >= 0
+            st = array.get(fvgStateArr, i)
+            if st == FVG_INVALID or st == FVG_FILLED
+                bx = array.get(fvgBoxArr, i)
                 if not na(bx)
                     box.delete(bx)
-                array.set(fvgStateArr, i, FVG_INVALID)
 
-// Aggregate active registry into one score + best proximity
+                array.remove(fvgTopArr, i)
+                array.remove(fvgBotArr, i)
+                array.remove(fvgBullArr, i)
+                array.remove(fvgBirthArr, i)
+                array.remove(fvgStateArr, i)
+                array.remove(fvgFillArr, i)
+                array.remove(fvgBoxArr, i)
+
+            i -= 1
+    0
+
+// ============================================================================
+// [FVG.9] Main orchestrator
+// ============================================================================
+fUpdateFVGRegistry() =>
+    if not inEnableMultiFVG or not inEnableFVG
+        fClearActiveFVGRegistry()
+    else
+        if not fRegistryAligned()
+            fClearActiveFVGRegistry()
+
+        fUpdateFVGRegistryDetect()
+        fUpdateFVGRegistryLifecycle()
+        fUpdateFVGRegistryRender()
+        fCompactInactiveFVGs()
+    0
+
+// ============================================================================
+// [FVG.10] Aggregate active registry into score + proximity
+// ============================================================================
 fFVGRegistryAggregateScore() =>
     total = 0.0
     proxBest = 0.0
+    activeCnt = 0
     cnt = array.size(fvgTopArr)
 
     if cnt == 0
         [0.0, 0.0]
     else
-        for i = 0 to cnt - 1
+        atrv = ta.atr(inAtrLen)
+
+        i = 0
+        while i < cnt
             st = array.get(fvgStateArr, i)
-            // only active states contribute
             if st == FVG_FRESH or st == FVG_PARTIAL
+                activeCnt += 1
                 top = array.get(fvgTopArr, i)
                 bot = array.get(fvgBotArr, i)
                 mid = (top + bot) * 0.5
-                prox = fClamp(1.0 - fSafeDiv(math.abs(close - mid), ta.atr(inAtrLen), 1e-6), 0.0, 1.0)
+                prox = fClamp(1.0 - fSafeDiv(math.abs(close - mid), atrv, 1e-6), 0.0, 1.0)
                 proxBest := math.max(proxBest, prox)
 
                 s = st == FVG_FRESH ? 0.22 : 0.10
                 total += s * (0.5 + 0.5 * prox)
 
-        [fSafeDiv(total, cnt, 1e-6), proxBest]
+            i += 1
 
-// ----------------------------------------------------------------------------
-// [D] Pivot events registry + on-chart anchors
-// ----------------------------------------------------------------------------
-var pivEventBarArr = array.new_int()
-var pivEventTypeArr = array.new_string()   // PH, PL, BOS, CHOCH
-var pivEventPriceArr = array.new_float()
-var pivEventDirArr = array.new_int()       // +1 / -1
-var pivAnchorLineArr = array.new_line()
-
-fAddPivotEvent(_bar, _type, _price, _dir) =>
-    maxRows = inPivotEventRows
-    array.unshift(pivEventBarArr, _bar)
-    array.unshift(pivEventTypeArr, _type)
-    array.unshift(pivEventPriceArr, _price)
-    array.unshift(pivEventDirArr, _dir)
-
-    if array.size(pivEventBarArr) > maxRows
-        array.pop(pivEventBarArr)
-        array.pop(pivEventTypeArr)
-        array.pop(pivEventPriceArr)
-        array.pop(pivEventDirArr)
-
-fDrawPivotAnchor(_bar, _price, _dir) =>
-    if inEnablePivotAnchors and inShowVisual
-        col = _dir > 0 ? color.new(fColorBull(), 25) : color.new(fColorBear(), 25)
-        ln = line.new(_bar, _price, bar_index, _price, xloc=xloc.bar_index, extend=extend.none, color=col, width=inLineThin, style=line.style_dotted)
-        array.unshift(pivAnchorLineArr, ln)
-
-        if array.size(pivAnchorLineArr) > inDrawBudget
-            old = array.pop(pivAnchorLineArr)
-            line.delete(old)
-
-fCapturePivotEvents(_ph, _pl, _bos, _choch, _lastPH, _lastPL, _dir) =>
-    if inEnablePivotEventRows
-        if not na(_ph)
-            fAddPivotEvent(bar_index - inPivotRight, "PH", _ph, +1)
-            fDrawPivotAnchor(bar_index - inPivotRight, _ph, +1)
-
-        if not na(_pl)
-            fAddPivotEvent(bar_index - inPivotRight, "PL", _pl, -1)
-            fDrawPivotAnchor(bar_index - inPivotRight, _pl, -1)
-
-        if _bos
-            pr = _dir > 0 ? _lastPH : _lastPL
-            if not na(pr)
-                fAddPivotEvent(bar_index, "BOS", pr, _dir)
-                fDrawPivotAnchor(bar_index, pr, _dir)
-
-        if _choch
-            pr = _dir > 0 ? _lastPH : _lastPL
-            if not na(pr)
-                fAddPivotEvent(bar_index, "CHOCH", pr, _dir)
-                fDrawPivotAnchor(bar_index, pr, _dir)
-
-fPivotEventSummary() =>
-    if array.size(pivEventTypeArr) == 0
-        "NA"
-    else
-        t = array.get(pivEventTypeArr, 0)
-        p = array.get(pivEventPriceArr, 0)
-        t + "@" + str.tostring(p, "#.##")
+        if activeCnt == 0
+            [0.0, 0.0]
+        else
+            [fSafeDiv(total, activeCnt, 1e-6), proxBest]
 
 // ============================================================================
 // S6 BLOCK 3/4
@@ -689,9 +763,127 @@ fComputeIndicators() =>
 
     [_macdScore, _rsiScore, _vwapScore, _maScore, _vidya, _vidyaScore, _cycleScore, _cyclePhase, _crossSignal, _mtfTrend, _mtfMomentum]
 
-// ----------------------------------------------------------------------------
-// [B] Structure module (strict pivots + SMC context)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// [STRUCTURE] Pivot Event Registry
+// ============================================================================
+
+var pivotEvtBarArr = array.new_int()
+var pivotEvtTypeArr = array.new_string()
+var pivotEvtPriceArr = array.new_float()
+var pivotEvtDirArr = array.new_int()
+var pivotEvtBosArr = array.new_bool()
+var pivotEvtChochArr = array.new_bool()
+
+var pivotAnchorLineArr = array.new_line()
+var pivotAnchorLabelArr = array.new_label()
+
+fPushPivotEvent(_bar, _type, _price, _dir, _bos, _choch) =>
+    array.unshift(pivotEvtBarArr, _bar)
+    array.unshift(pivotEvtTypeArr, _type)
+    array.unshift(pivotEvtPriceArr, _price)
+    array.unshift(pivotEvtDirArr, _dir)
+    array.unshift(pivotEvtBosArr, _bos)
+    array.unshift(pivotEvtChochArr, _choch)
+
+    if array.size(pivotEvtBarArr) > inPivotEventRows
+        array.pop(pivotEvtBarArr)
+        array.pop(pivotEvtTypeArr)
+        array.pop(pivotEvtPriceArr)
+        array.pop(pivotEvtDirArr)
+        array.pop(pivotEvtBosArr)
+        array.pop(pivotEvtChochArr)
+    0
+
+fTrimPivotAnchors() =>
+    while array.size(pivotAnchorLineArr) > inPivotEventRows
+        ln = array.pop(pivotAnchorLineArr)
+        if not na(ln)
+            line.delete(ln)
+
+    while array.size(pivotAnchorLabelArr) > inPivotEventRows
+        lb = array.pop(pivotAnchorLabelArr)
+        if not na(lb)
+            label.delete(lb)
+    0
+
+fMakePivotAnchor(_bar, _price, _txt, _bull) =>
+    if inEnablePivotAnchors and inShowVisual
+        c = _bull ? color.new(fColorBull(), inAlphaMedium) : color.new(fColorBear(), inAlphaMedium)
+
+        ln = line.new(
+             x1 = _bar,
+             y1 = _price,
+             x2 = bar_index,
+             y2 = _price,
+             xloc = xloc.bar_index,
+             extend = extend.none,
+             color = c,
+             style = fLineStyle(inLineStyleSignal),
+             width = inLineThin)
+
+        lb = label.new(
+             x = _bar,
+             y = _price,
+             text = _txt,
+             xloc = xloc.bar_index,
+             style = _bull ? label.style_label_up : label.style_label_down,
+             textcolor = color.white,
+             color = c,
+             size = size.tiny)
+
+        array.unshift(pivotAnchorLineArr, ln)
+        array.unshift(pivotAnchorLabelArr, lb)
+        fTrimPivotAnchors()
+    0
+
+fPivotEventSummary() =>
+    if array.size(pivotEvtBarArr) == 0
+        "NA"
+    else
+        typ = array.get(pivotEvtTypeArr, 0)
+        px = array.get(pivotEvtPriceArr, 0)
+        dir = array.get(pivotEvtDirArr, 0)
+        bos = array.get(pivotEvtBosArr, 0)
+        choch = array.get(pivotEvtChochArr, 0)
+
+        dirTxt = dir > 0 ? "BULL" : dir < 0 ? "BEAR" : "NEUT"
+        evtTxt = typ
+
+        if bos
+            evtTxt += "+BOS"
+        if choch
+            evtTxt += "+CHOCH"
+
+        evtTxt + "@" + str.tostring(px, format.mintick) + "|" + dirTxt
+
+fCapturePivotEvents(_ph, _pl, _bos, _choch, _lastPH, _lastPL, _structureDir) =>
+    if inEnablePivotEventRows
+        if not na(_ph)
+            evtBarPH = bar_index - inPivotRight
+            evtTxtPH = _bos ? "PH+BOS" : _choch ? "PH+CHOCH" : "PH"
+            fPushPivotEvent(evtBarPH, "PH", _ph, _structureDir, _bos, _choch)
+            fMakePivotAnchor(evtBarPH, _ph, evtTxtPH, true)
+
+        if not na(_pl)
+            evtBarPL = bar_index - inPivotRight
+            evtTxtPL = _bos ? "PL+BOS" : _choch ? "PL+CHOCH" : "PL"
+            fPushPivotEvent(evtBarPL, "PL", _pl, _structureDir, _bos, _choch)
+            fMakePivotAnchor(evtBarPL, _pl, evtTxtPL, false)
+    0
+
+fPivotEventAgeSummary() =>
+    if array.size(pivotEvtBarArr) == 0
+        "NA"
+    else
+        b = array.get(pivotEvtBarArr, 0)
+        typ = array.get(pivotEvtTypeArr, 0)
+        age = bar_index - b
+        typ + ":" + str.tostring(age)
+
+// ============================================================================
+// [STRUCTURE] Strict pivots + SMC context
+// ============================================================================
+
 fComputeStructure() =>
     ph = ta.pivothigh(high, inPivotLeft, inPivotRight)
     pl = ta.pivotlow(low, inPivotLeft, inPivotRight)
@@ -704,6 +896,7 @@ fComputeStructure() =>
     if not na(ph)
         _prevPH := _lastPH
         _lastPH := ph
+
     if not na(pl)
         _prevPL := _lastPL
         _lastPL := pl
@@ -722,14 +915,19 @@ fComputeStructure() =>
     chochBear = inEnableCHOCH and prevDir == 1 and _structureDir == -1 and not na(_lastPL) and close < _lastPL
     _choch = chochBull or chochBear
 
-    _liqSweep = inEnableLiquidity and ((high > ta.highest(high[1], 20) and close < high) or (low < ta.lowest(low[1], 20) and close > low))
+    hh20 = ta.highest(high[1], 20)
+    ll20 = ta.lowest(low[1], 20)
+
+    _liqSweep = inEnableLiquidity and ((high > hh20 and close < high) or (low < ll20 and close > low))
     _obTouch = inEnableOB and (math.abs(close - ta.sma(close, 50)) < ta.atr(inAtrLen) * 0.25)
     _htfBias = fNorm((ta.ema(close, 50) - ta.ema(close, 200)) / ta.atr(inAtrLen), 1.0)
 
-    // capture events into pivot registry
     fCapturePivotEvents(ph, pl, _bos, _choch, _lastPH, _lastPL, _structureDir)
 
     [_lastPH, _prevPH, _lastPL, _prevPL, _structureDir, _bos, _choch, _liqSweep, _obTouch, _htfBias]
+// ----------------------------------------------------------------------------
+// Internal bounded push helpers
+// ----------------------------------------------------------------------------
 
 // ----------------------------------------------------------------------------
 // [C] Wave module
@@ -900,15 +1098,13 @@ fBuildTag() =>
     sCross = stCrossSignal == 1 ? "X:WHITE" : stCrossSignal == -1 ? "X:BLACK" : "X:NONE"
     sStruct = stBos ? "BOS" : stChoch ? "CHOCH" : "STRUCT:NA"
     sReg + "|" + sCross + "|" + sStruct
-
-fPivotEventAgeSummary() =>
-    if array.size(pivEventBarArr) == 0
-        "NA"
-    else
-        b = array.get(pivEventBarArr, 0)
-        typ = array.get(pivEventTypeArr, 0)
-        age = bar_index - b
-        typ + ":" + str.tostring(age)
+   
+var pivEventBarArr = array.new_int()
+var pivEventTypeArr = array.new_string()
+var pivEventPriceArr = array.new_float()
+var pivEventDirArr = array.new_int()
+var pivEventBosArr = array.new_bool()
+var pivEventChochArr = array.new_bool()
 
 // ----------------------------------------------------------------------------
 // [B] Experience processing: Q + reliability
@@ -1002,7 +1198,7 @@ var arrRel = array.new_string()
 var arrPivot = array.new_string()
 var arrConflict = array.new_float()
 
-var table gTable = table.new(position.top_right, 17, inTableRows + 1, border_width=1)
+var table gTable = table.new(position.top_left, 17, inTableRows + 1, border_width=1)
 
 fTableHeader() =>
     table.cell(gTable, 0, 0, "Bar", text_color=color.white, bgcolor=color.new(color.black, 0))
@@ -1077,7 +1273,7 @@ fTableRender() =>
 // ----------------------------------------------------------------------------
 fDrawSignal() =>
     if not inShowVisual
-        return
+        na
 
     col = stSignal == SIG_LONG ? fColorBull() : stSignal == SIG_SHORT ? fColorBear() : fColorNeutral()
     alpha = stConfidence > 0.75 ? inAlphaStrong : stConfidence > 0.55 ? inAlphaMedium : inAlphaSoft
@@ -1144,6 +1340,7 @@ if isReady
     stMtfTrend := _stMtfTrend
     stMtfMomentum := _stMtfMomentum
 
+//Could not find function or function reference 'fComputeStructure'(CE10271)
     [_stLastPivotHigh, _stPrevPivotHigh, _stLastPivotLow, _stPrevPivotLow, _stStructureDir, _stBos, _stChoch, _stLiqSweep, _stObTouch, _stHtfBias] = fComputeStructure()
     stLastPivotHigh := _stLastPivotHigh
     stPrevPivotHigh := _stPrevPivotHigh
@@ -1219,6 +1416,8 @@ if isReady
     fPushString(arrPivot, fPivotEventSummary() + "|" + fPivotEventAgeSummary(), inTableRows)
     fPushString(arrRel, fRelSummary(), inTableRows)
     fPushFloat(arrConflict, stConflict, inTableRows)
+
+//Could not find function or function reference 'fPivotEventSummary'(CE10271)
 
     // 7) render
     fTableRender()
