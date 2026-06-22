@@ -159,8 +159,9 @@ if not na(ph)
 if not na(pl)
     prevPL := lastPL
     lastPL := pl
-nStruct = not na(lastPH) and not na(prevPH) ?
-           fNorm(lastPH - prevPH, 0.0, atr) : 0.0
+nStructH = not na(lastPH) and not na(prevPH) ? fNorm(lastPH - prevPH, 0.0, atr) : 0.0
+nStructL = not na(lastPL) and not na(prevPL) ? fNorm(lastPL - prevPL, 0.0, atr) : 0.0
+nStruct  = (nStructH + nStructL) / 2.0
 
 // ── Weighted composite ────────────────────────────────────────════════════────
 wTotal = inWTrend + inWMom + inWStruct + inWVol
