@@ -1,0 +1,188 @@
+//@version=6
+// ============================================================================
+// Pinnacle Market Enums  ·  _enum_lib.pine
+// ============================================================================
+// Pine Script library exporting all shared constants used across the
+// Pinnacle strategy ecosystem.
+//
+// USAGE (after publishing to TradingView):
+//   import <username>/PinnacleMarketEnums/1 as E
+//   if state == E.zone_tested()
+//       ...
+//
+// While unpublished, copy the constant blocks you need directly into each
+// indicator script.  All identifiers follow the market-parquet vocabulary —
+// they describe exchange-floor / institutional concepts, not internal tech
+// names, so they remain meaningful even in complex multi-module contexts.
+// ============================================================================
+library("PinnacleMarketEnums", overlay = false)
+
+// ────────────────────────────────────────────────────────────────────────────
+// ZONE  ·  Lifecycle of any price zone (FVG, Supply/Demand, OB, Imbalance)
+// ────────────────────────────────────────────────────────────────────────────
+// PRISTINE   – freshly created, price has not returned
+// TESTED     – price approached the zone boundary but did not fill it
+// BREACHED   – zone has been partially overlapped (partial fill)
+// CONSUMED   – zone is ≥95 % absorbed; no longer active
+// VOIDED     – structurally invalidated (close beyond the zone extreme)
+export zone_pristine()  => 0
+export zone_tested()    => 1
+export zone_breached()  => 2
+export zone_consumed()  => 3
+export zone_voided()    => 4
+
+// ────────────────────────────────────────────────────────────────────────────
+// POSTURE  ·  Wyckoff / market-phase classification
+// ────────────────────────────────────────────────────────────────────────────
+export posture_markup()       => 1    // uptrend / distribution markup
+export posture_markdown()     => -1   // downtrend / markdown phase
+export posture_accumulation() => 2    // basing range (smart-money buying)
+export posture_distribution() => -2   // topping range (smart-money selling)
+export posture_transition()   => 0    // between phases, direction unclear
+
+// ────────────────────────────────────────────────────────────────────────────
+// CANDLE CHARACTER  ·  Institutional footprint reading
+// ────────────────────────────────────────────────────────────────────────────
+export candle_impulse()       => 1    // large body, directional conviction
+export candle_exhaustion()    => 2    // engulfing with extended wick (trap)
+export candle_doji()          => 3    // body < 15 % of range (indecision)
+export candle_inside()        => 4    // inside the prior bar (compression)
+export candle_outside()       => 5    // outside the prior bar (expansion)
+export candle_pinbar()        => 6    // long single-wick rejection
+export candle_consolidation() => 7    // narrow range, volume contracting
+export candle_breakout()      => 8    // range break with volume surge
+export candle_pullback()      => 9    // retracement candle within a trend
+export candle_reversal()      => 10   // turn candle at a key structural level
+export candle_acceleration()  => 11   // successive larger-body candles, same direction
+export candle_mean_rev()      => 12   // close against open at prior level (mean reversion)
+
+// ────────────────────────────────────────────────────────────────────────────
+// HEIKIN ASHI CHARACTER  ·  HA-specific candle quality
+// ────────────────────────────────────────────────────────────────────────────
+export ha_full_bull()   => 1   // no lower wick, solid bull body
+export ha_full_bear()   => -1  // no upper wick, solid bear body
+export ha_indecision()  => 0   // both wicks present
+export ha_pull_up()     => 2   // small lower wick during uptrend
+export ha_pull_down()   => -2  // small upper wick during downtrend
+
+// ────────────────────────────────────────────────────────────────────────────
+// WAVE  ·  Elliott Wave labels (positive = impulse legs, negative = corrective)
+// ────────────────────────────────────────────────────────────────────────────
+export wave_i1()        =>  1
+export wave_i2()        =>  2
+export wave_i3()        =>  3
+export wave_i4()        =>  4
+export wave_i5()        =>  5
+export wave_ca()        => -1   // corrective A
+export wave_cb()        => -2   // corrective B
+export wave_cc()        => -3   // corrective C
+export wave_tri_d()     => -4   // triangle D leg
+export wave_tri_e()     => -5   // triangle E leg
+export wave_unknown()   =>  0
+
+// ────────────────────────────────────────────────────────────────────────────
+// SIGNAL POSTURE  ·  Trade direction and entry intent
+// ────────────────────────────────────────────────────────────────────────────
+export sig_long()       =>  1
+export sig_short()      => -1
+export sig_standby()    =>  0   // no-trade (conflict gate or low conviction)
+
+// ────────────────────────────────────────────────────────────────────────────
+// RISK GRADE  ·  Position-sizing tier
+// ────────────────────────────────────────────────────────────────────────────
+export risk_prime()     => 1   // A-grade: low risk, high conviction, full size
+export risk_standard()  => 2   // B-grade: normal position
+export risk_caution()   => 3   // C-grade: reduced size, high uncertainty
+
+// ────────────────────────────────────────────────────────────────────────────
+// REGIME  ·  Macro market environment classification
+// ────────────────────────────────────────────────────────────────────────────
+export regime_trending()     => 1
+export regime_ranging()      => 2
+export regime_volatile()     => 3
+export regime_transitional() => 4
+
+// ────────────────────────────────────────────────────────────────────────────
+// VOLUME SENTIMENT  ·  What the volume footprint suggests
+// ────────────────────────────────────────────────────────────────────────────
+export vol_absorption()  => 1   // large volume absorbed at S/R — reversal hint
+export vol_climax()      => 2   // exhaustion spike — potential turning point
+export vol_dry()         => 3   // drying up — participation waning
+export vol_surge()       => 4   // breakout volume — continuation signal
+export vol_balanced()    => 0   // normal, no strong footprint reading
+
+// ────────────────────────────────────────────────────────────────────────────
+// SMC CONTEXT  ·  Smart Money Concepts structural events
+// ────────────────────────────────────────────────────────────────────────────
+export smc_bos_bull()    =>  1   // Break of Structure — bullish
+export smc_bos_bear()    => -1   // Break of Structure — bearish
+export smc_choch_bull()  =>  2   // Change of Character — bullish (trend reversal)
+export smc_choch_bear()  => -2   // Change of Character — bearish
+export smc_liq_sweep()   =>  3   // Liquidity sweep (stop-hunt)
+export smc_none()        =>  0
+
+// ────────────────────────────────────────────────────────────────────────────
+// HTF BIAS  ·  Higher-timeframe directional alignment
+// ────────────────────────────────────────────────────────────────────────────
+export htf_bull()     =>  1
+export htf_bear()     => -1
+export htf_neutral()  =>  0
+
+// ────────────────────────────────────────────────────────────────────────────
+// MOMENTUM STATE  ·  Oscillator condition
+// ────────────────────────────────────────────────────────────────────────────
+export mom_bull_conv()   =>  2   // bullish convergence (momentum confirms price)
+export mom_bull_div()    =>  1   // bullish divergence (momentum leads price up)
+export mom_neutral()     =>  0
+export mom_bear_div()    => -1   // bearish divergence (momentum leads price down)
+export mom_bear_conv()   => -2   // bearish convergence
+
+// ────────────────────────────────────────────────────────────────────────────
+// PIVOT EVENT TYPE  ·  Named structural pivot categories
+// ────────────────────────────────────────────────────────────────────────────
+export pivot_high()         => 1
+export pivot_low()          => -1
+export pivot_hh()           => 2    // higher high
+export pivot_hl()           => 3    // higher low
+export pivot_lh()           => -2   // lower high
+export pivot_ll()           => -3   // lower low
+
+// ────────────────────────────────────────────────────────────────────────────
+// CYCLE PHASE  ·  Position within a detrended oscillation
+// ────────────────────────────────────────────────────────────────────────────
+export cycle_bottom()    => 1
+export cycle_rise()      => 2
+export cycle_peak()      => 3
+export cycle_decline()   => 4
+
+// ────────────────────────────────────────────────────────────────────────────
+// LINE STYLE  ·  Canonical style names matching Pine Script constants
+// ────────────────────────────────────────────────────────────────────────────
+export lstyle_solid()   => "Solid"
+export lstyle_dashed()  => "Dashed"
+export lstyle_dotted()  => "Dotted"
+
+// ────────────────────────────────────────────────────────────────────────────
+// SESSION TOKEN  ·  Named time-session identifiers for multi-session logic
+// ────────────────────────────────────────────────────────────────────────────
+export session_asian()    => 0
+export session_london()   => 1
+export session_ny()       => 2
+export session_overlap()  => 3   // London/NY overlap — highest liquidity window
+export session_off()      => -1  // outside all major sessions
+
+// ────────────────────────────────────────────────────────────────────────────
+// FIBONACCI CONTEXT  ·  Level role classification
+// ────────────────────────────────────────────────────────────────────────────
+export fib_retracement()  => 1
+export fib_extension()    => 2
+export fib_cluster()      => 3   // multiple fib levels coincide (high confluence)
+
+// ────────────────────────────────────────────────────────────────────────────
+// AREA CHART SIGNAL  ·  Visual indication art type for Area-mode overlay
+// ────────────────────────────────────────────────────────────────────────────
+export area_flow_bull()   =>  1   // positive area above baseline
+export area_flow_bear()   => -1   // negative area below baseline
+export area_breakout()    =>  2   // area expands rapidly above prior max
+export area_breakdown()   => -2   // area collapses below prior min
+export area_neutral()     =>  0
