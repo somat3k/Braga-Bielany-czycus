@@ -267,8 +267,6 @@ fUpdateWaveLabels() =>
                                    color = color.new(color.black, 80),
                                    size = size.tiny)
                 array.push(waveLabels, lbProj)
-    0
-
 fUpdateWaveLabels()
 
 // ════════════════════════════════════════════════════════════════════════════

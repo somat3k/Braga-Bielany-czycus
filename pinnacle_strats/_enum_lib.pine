@@ -15,7 +15,7 @@
 // they describe exchange-floor / institutional concepts, not internal tech
 // names, so they remain meaningful even in complex multi-module contexts.
 // ============================================================================
-library("PinnacleMarketEnums", overlay = false)
+library("PinnacleMarketEnums")
 
 // ────────────────────────────────────────────────────────────────────────────
 // ZONE  ·  Lifecycle of any price zone (FVG, Supply/Demand, OB, Imbalance)

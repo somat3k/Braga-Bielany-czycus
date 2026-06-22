@@ -201,9 +201,7 @@ var table pivTable = table.new(position.bottom_left, 8, 1,
                                bgcolor      = color.new(color.black, 75))
 
 fPivotTableBuild() =>
-    tPos = fTablePosition(inTablePos)
-    // Recreate on position change is not needed — table position is fixed at creation.
-    // Add header row
+    // Header row
     hdr = array.from("Bar", "Price", "Type", "SMC", "ATR×", "Vol×", "Age", "Sess")
     hdrColors = array.from(color.gray, color.gray, color.gray, color.gray,
                             color.gray, color.gray, color.gray, color.gray)

@@ -247,9 +247,6 @@ var table sumTable = table.new(position.top_right, 2, 14, border_width = 1,
 
 if barstate.islast and inShowTable
     hdrBg = color.new(color.black, 55)
-    def(k, v, vc) =>
-        table.cell(sumTable, 0, k, v,  text_color = color.gray,             bgcolor = hdrBg,  text_size = size.tiny)
-        table.cell(sumTable, 1, k, v,  text_color = color.new(color.gray,1),bgcolor = hdrBg,  text_size = size.tiny)
 
     // Header
     table.cell(sumTable, 0, 0, "Metric",          text_color = color.gray,   bgcolor = color.new(color.black, 50), text_size = size.tiny)

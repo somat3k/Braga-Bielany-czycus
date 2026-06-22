@@ -153,8 +153,9 @@ nMacd        = inEnMacd ? fNorm(macdHist, 0.0, atr) : 0.0
 rsiRaw  = ta.rsi(close, inRsiLen)
 nRsi    = inEnRsi ? fNorm(rsiRaw, 50.0, 20.0) : 0.0
 
-// Stoch RSI
-[stochK, stochD] = ta.stoch(close, high, low, inStochLen)
+// Stochastic (K/D applied to RSI for true Stoch-RSI behaviour)
+rsiForStoch      = ta.rsi(close, inRsiLen)
+[stochK, stochD] = ta.stoch(rsiForStoch, rsiForStoch, rsiForStoch, inStochLen)
 stochSmoothed    = ta.sma(stochK, inStochSmooth)
 nStoch = inEnStochRsi ? fNorm(stochSmoothed, 50.0, 20.0) : 0.0
 

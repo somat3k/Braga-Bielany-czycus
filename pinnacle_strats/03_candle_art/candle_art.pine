@@ -177,10 +177,11 @@ appliedColor = inCandleMode == "Heikin Ashi" ? fHABodyColor() :
 barcolor(inBarcEnable ? appliedColor : na, title = "Candle Art Bar Colour")
 
 // ── HA candle plot (secondary series, always below main candles) ───────────────
-plotcandle(inCandleMode != "Classic" ? haOpen : na,
-           inCandleMode != "Classic" ? haHigh : na,
-           inCandleMode != "Classic" ? haLow  : na,
-           inCandleMode != "Classic" ? haClose: na,
+isHAMode = inCandleMode != "Classic"
+plotcandle(isHAMode ? haOpen : na,
+           isHAMode ? haHigh : na,
+           isHAMode ? haLow  : na,
+           isHAMode ? haClose: na,
            title       = "HA Candles",
            color       = color.new(fHABodyColor(), 50),
            wickcolor   = haIsBull ? color.new(inColWickBull, 40) : color.new(inColWickBear, 40),

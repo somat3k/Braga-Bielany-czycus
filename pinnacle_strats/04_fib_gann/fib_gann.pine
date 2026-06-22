@@ -130,8 +130,9 @@ fLineStyle(s) =>
 fSafeDiv(a, b) => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
 
 fFibPrice(isUp, lo, hi, lvl, isExt) =>
-    minRng = math.max(math.abs(hi - lo) * 0.0001, syminfo.mintick * 10)
-    rng = math.max(hi - lo, minRng)
+    absRng  = math.abs(hi - lo)
+    minRng  = math.max(absRng * 0.0001, syminfo.mintick * 10)
+    rng     = math.max(absRng, minRng)
     isUp ? (isExt ? hi + rng * (lvl - 1.0) : hi - rng * lvl) :
            (isExt ? lo - rng * (lvl - 1.0) : lo + rng * lvl)
 

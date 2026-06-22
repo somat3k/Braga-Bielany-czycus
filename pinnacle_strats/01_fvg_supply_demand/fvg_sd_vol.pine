@@ -612,10 +612,10 @@ fCompactSD() =>
 // ════════════════════════════════════════════════════════════════════════════
 // [F]  HTF S/D SHADOW OVERLAY  (senior timeframe zones, lightly shaded)
 // ════════════════════════════════════════════════════════════════════════════
-var float htfHigh = request.security(syminfo.tickerid, inHtfTf, high,  barmerge.gaps_off, barmerge.lookahead_off)
-var float htfLow  = request.security(syminfo.tickerid, inHtfTf, low,   barmerge.gaps_off, barmerge.lookahead_off)
-var float htfOpen = request.security(syminfo.tickerid, inHtfTf, open,  barmerge.gaps_off, barmerge.lookahead_off)
-var float htfClose= request.security(syminfo.tickerid, inHtfTf, close, barmerge.gaps_off, barmerge.lookahead_off)
+htfHigh  = request.security(syminfo.tickerid, inHtfTf, high,  barmerge.gaps_off, barmerge.lookahead_off)
+htfLow   = request.security(syminfo.tickerid, inHtfTf, low,   barmerge.gaps_off, barmerge.lookahead_off)
+htfOpen  = request.security(syminfo.tickerid, inHtfTf, open,  barmerge.gaps_off, barmerge.lookahead_off)
+htfClose = request.security(syminfo.tickerid, inHtfTf, close, barmerge.gaps_off, barmerge.lookahead_off)
 
 var box htfDemandBox = na
 var box htfSupplyBox = na
