@@ -153,8 +153,12 @@ var float lastPH = na
 var float lastPL = na
 var float prevPH = na
 var float prevPL = na
-if not na(ph) then prevPH := lastPH; lastPH := ph
-if not na(pl) then prevPL := lastPL; lastPL := pl
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
 nStruct = not na(lastPH) and not na(prevPH) ?
            fNorm(lastPH - prevPH, 0.0, atr) : 0.0
 
@@ -232,8 +236,10 @@ losses = 0
 nn = array.size(perfResult)
 for k = 0 to nn - 1
     r = array.get(perfResult, k)
-    if r ==  1 then wins   += 1
-    if r == -1 then losses += 1
+    if r ==  1
+        wins   += 1
+    if r == -1
+        losses += 1
 
 total  = wins + losses
 winRate = total > 0 ? fSafeDiv(wins, total) : na

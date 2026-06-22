@@ -287,7 +287,7 @@ isGlowing = inEnGlow and not na(glowCol)
 if isGlowing
     // Glow background box spanning this bar
     gb = box.new(bar_index, high * (1.0 + fSafeDiv(atr, high) * 0.3),
-                 bar_index, low  * (1.0 - fSafeDiv(atr, low)  * 0.3),
+                 bar_index + 1, low  * (1.0 - fSafeDiv(atr, low)  * 0.3),
                  xloc = xloc.bar_index,
                  bgcolor = color.new(glowCol, inGlowBoxAlpha),
                  border_color = color.new(glowCol, 50),

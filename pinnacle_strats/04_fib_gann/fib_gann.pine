@@ -236,8 +236,10 @@ var box[]  gannBoxes = array.new_box()
 var line[] gannLines = array.new_line()
 
 fClearGann() =>
-    while array.size(gannBoxes) > 0 then box.delete(array.pop(gannBoxes))
-    while array.size(gannLines) > 0 then line.delete(array.pop(gannLines))
+    while array.size(gannBoxes) > 0
+        box.delete(array.pop(gannBoxes))
+    while array.size(gannLines) > 0
+        line.delete(array.pop(gannLines))
     0
 
 var int gannKey = na
@@ -304,7 +306,8 @@ fUpdateGann()
 var line[] srlLines = array.new_line()
 
 fClearSrl() =>
-    while array.size(srlLines) > 0 then line.delete(array.pop(srlLines))
+    while array.size(srlLines) > 0
+        line.delete(array.pop(srlLines))
     0
 
 var int srlKey = na
@@ -347,31 +350,39 @@ fUpdateSrl()
 var line[] wedgeLines = array.new_line()
 
 fClearWedge() =>
-    while array.size(wedgeLines) > 0 then line.delete(array.pop(wedgeLines))
+    while array.size(wedgeLines) > 0
+        line.delete(array.pop(wedgeLines))
     0
 
+var int wedgeKey = na
+
 fUpdateWedge() =>
-    fClearWedge()
     if inEnWedge and array.size(pivHBar) >= 3 and array.size(pivLBar) >= 3
-        hB2 = array.get(pivHBar,   2); hP2 = array.get(pivHPrice, 2)
-        hB1 = array.get(pivHBar,   1); hP1 = array.get(pivHPrice, 1)
-        lB2 = array.get(pivLBar,   2); lP2 = array.get(pivLPrice, 2)
-        lB1 = array.get(pivLBar,   1); lP1 = array.get(pivLPrice, 1)
-        sH  = fSafeDiv(hP1 - hP2, hB1 - hB2)
-        sL  = fSafeDiv(lP1 - lP2, lB1 - lB2)
-        x2  = bar_index + inWedgeLookahead
-        yH2 = hP1 + sH * (x2 - hB1)
-        yL2 = lP1 + sL * (x2 - lB1)
-        den = sH - sL
-        wCol = sH > 0 and sL > 0 ? color.new(inColShort, 40) :
-               sH < 0 and sL < 0 ? color.new(inColLong,  40) :
-               color.new(inColWedge, 40)
-        lH = line.new(hB1, hP1, x2, yH2, xloc = xloc.bar_index,
-                      color = wCol, style = fLineStyle(inWedgeStyle), width = 2)
-        lL = line.new(lB1, lP1, x2, yL2, xloc = xloc.bar_index,
-                      color = wCol, style = fLineStyle(inWedgeStyle), width = 2)
-        array.push(wedgeLines, lH)
-        array.push(wedgeLines, lL)
+        hB1 = array.get(pivHBar,   1)
+        lB1 = array.get(pivLBar,   1)
+        kk  = math.min(hB1, lB1)
+        if wedgeKey != kk
+            wedgeKey := kk
+            fClearWedge()
+            hB2 = array.get(pivHBar,   2); hP2 = array.get(pivHPrice, 2)
+            hP1 = array.get(pivHPrice, 1)
+            lB2 = array.get(pivLBar,   2); lP2 = array.get(pivLPrice, 2)
+            lP1 = array.get(pivLPrice, 1)
+            sH  = fSafeDiv(hP1 - hP2, hB1 - hB2)
+            sL  = fSafeDiv(lP1 - lP2, lB1 - lB2)
+            x2  = bar_index + inWedgeLookahead
+            yH2 = hP1 + sH * (x2 - hB1)
+            yL2 = lP1 + sL * (x2 - lB1)
+            den = sH - sL
+            wCol = sH > 0 and sL > 0 ? color.new(inColShort, 40) :
+                   sH < 0 and sL < 0 ? color.new(inColLong,  40) :
+                   color.new(inColWedge, 40)
+            lH = line.new(hB1, hP1, x2, yH2, xloc = xloc.bar_index,
+                          color = wCol, style = fLineStyle(inWedgeStyle), width = 2)
+            lL = line.new(lB1, lP1, x2, yL2, xloc = xloc.bar_index,
+                          color = wCol, style = fLineStyle(inWedgeStyle), width = 2)
+            array.push(wedgeLines, lH)
+            array.push(wedgeLines, lL)
     0
 
 fUpdateWedge()
@@ -382,7 +393,8 @@ fUpdateWedge()
 var box[] cycleBoxes = array.new_box()
 
 fClearCycles() =>
-    while array.size(cycleBoxes) > 0 then box.delete(array.pop(cycleBoxes))
+    while array.size(cycleBoxes) > 0
+        box.delete(array.pop(cycleBoxes))
     0
 
 var int cycleKey = na
@@ -420,9 +432,12 @@ var box lsTargetBox= na
 
 if inEnLSBox and inLSMode != "None" and barstate.islast
     isLong = inLSMode == "Long"
-    if not na(lsEntryBox)  then box.delete(lsEntryBox)
-    if not na(lsStopBox)   then box.delete(lsStopBox)
-    if not na(lsTargetBox) then box.delete(lsTargetBox)
+    if not na(lsEntryBox)
+        box.delete(lsEntryBox)
+    if not na(lsStopBox)
+        box.delete(lsStopBox)
+    if not na(lsTargetBox)
+        box.delete(lsTargetBox)
 
     x2 = bar_index + inLSBarsAhead
     eTop = isLong ? math.max(inLSEntry, inLSStop)    : math.max(inLSEntry, inLSTarget)

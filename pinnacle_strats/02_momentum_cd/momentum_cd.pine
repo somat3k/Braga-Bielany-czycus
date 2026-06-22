@@ -244,27 +244,27 @@ if not na(pivLow)
 
 // Regular bearish divergence: price HH, oscillator LH
 regBearDiv = not na(lastPriceHigh) and not na(pivHigh) and
-             pivHigh > lastPriceHigh and
-             composite[inDivPivRight] < lastPriceHighOsc and
-             (bar_index - lastHighBar) <= inDivLookback
+             pivHigh > lastPriceHigh[1] and
+             composite[inDivPivRight] < lastPriceHighOsc[1] and
+             (bar_index - lastHighBar[1]) <= inDivLookback
 
 // Regular bullish divergence: price LL, oscillator HL
 regBullDiv = not na(lastPriceLow) and not na(pivLow) and
-             pivLow < lastPriceLow and
-             composite[inDivPivRight] > lastPriceLowOsc and
-             (bar_index - lastLowBar) <= inDivLookback
+             pivLow < lastPriceLow[1] and
+             composite[inDivPivRight] > lastPriceLowOsc[1] and
+             (bar_index - lastLowBar[1]) <= inDivLookback
 
 // Hidden bullish: price HL, oscillator LL
 hidBullDiv = not na(lastPriceLow) and not na(pivLow) and
-             pivLow > lastPriceLow and
-             composite[inDivPivRight] < lastPriceLowOsc and
-             (bar_index - lastLowBar) <= inDivLookback
+             pivLow > lastPriceLow[1] and
+             composite[inDivPivRight] < lastPriceLowOsc[1] and
+             (bar_index - lastLowBar[1]) <= inDivLookback
 
 // Hidden bearish: price LH, oscillator HH
 hidBearDiv = not na(lastPriceHigh) and not na(pivHigh) and
-             pivHigh < lastPriceHigh and
-             composite[inDivPivRight] > lastPriceHighOsc and
-             (bar_index - lastHighBar) <= inDivLookback
+             pivHigh < lastPriceHigh[1] and
+             composite[inDivPivRight] > lastPriceHighOsc[1] and
+             (bar_index - lastHighBar[1]) <= inDivLookback
 
 // ════════════════════════════════════════════════════════════════════════════
 // [G]  SMC CONTEXT (BOS / CHoCH)

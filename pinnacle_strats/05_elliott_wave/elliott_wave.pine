@@ -227,8 +227,10 @@ fUpdateWaveLabels() =>
         kk = array.get(bars, 0)
         if waveKey != kk
             waveKey := kk
-            while array.size(waveLabels) > 0 then label.delete(array.pop(waveLabels))
-            while array.size(waveLines) > 0 then line.delete(array.pop(waveLines))
+            while array.size(waveLabels) > 0
+                label.delete(array.pop(waveLabels))
+            while array.size(waveLines) > 0
+                line.delete(array.pop(waveLines))
 
             for j = 0 to math.min(3, n - 2)
                 wn = array.get(waveNums, j)
