@@ -1,0 +1,318 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 06 · PIVOT MACRO Table + Legend + Glowing Candles
+// ============================================================================
+// Indicator 6 of the Pinnacle ecosystem.
+//
+// MODULES
+// ────────
+// · PIVOT MACRO Table — multi-column table listing the last N pivot events
+//   with columns: Bar, Price, Type (PH/PL/HH/HL/LH/LL), Direction, BOS,
+//   CHoCH, Age (bars ago), ATR-relative size, Volume rating, Session.
+//
+// · Legend Primitives — floating table at bottom-right showing all candle
+//   character icons, colour swatch, and description.
+//
+// · Glowing Candles — when a special event occurs (BOS, CHoCH, Divergence,
+//   Extreme ATR, Volume Climax), the bar's candle is highlighted with a
+//   glow effect implemented via:
+//     1. barcolor() with near-zero alpha for body glow
+//     2. plotshape() with large size and low alpha for outer halo
+//     3. A translucent background box spanning the bar
+//
+// · Event-triggered highlights:
+//     BOS (Break of Structure)        → cyan glow
+//     CHoCH (Change of Character)     → gold glow
+//     Volume Climax                   → red/green glow
+//     ATR Spike (> 1.5× avg)          → white glow
+//     Extreme RSI (> 80 / < 20)       → purple/orange glow
+// ============================================================================
+indicator("Pinnacle · PIVOT MACRO Table", overlay = true,
+          max_lines_count  = 200,
+          max_labels_count = 200,
+          max_boxes_count  = 100)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUMS
+// ════════════════════════════════════════════════════════════════════════════
+var int PIVOT_HIGH =  1
+var int PIVOT_LOW  = -1
+var int PIVOT_HH   =  2
+var int PIVOT_HL   =  3
+var int PIVOT_LH   = -2
+var int PIVOT_LL   = -3
+
+var int SMC_BOS_BULL   =  1
+var int SMC_BOS_BEAR   = -1
+var int SMC_CHOCH_BULL =  2
+var int SMC_CHOCH_BEAR = -2
+var int SMC_NONE       =  0
+
+var int VOL_CLIMAX   = 2
+var int VOL_SURGE    = 4
+var int VOL_DRY      = 3
+var int VOL_BALANCED = 0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Pivot Detection ───────────────────────────────────────────────────────────
+grpPiv = "Pivot Detection"
+inPivLeft  = input.int(3,  "Pivot Left",    group = grpPiv, minval = 1, maxval = 20)
+inPivRight = input.int(3,  "Pivot Right",   group = grpPiv, minval = 1, maxval = 20)
+inTableRows= input.int(12, "Table Rows",    group = grpPiv, minval = 3, maxval = 30)
+inAtrLen   = input.int(14, "ATR Length",    group = grpPiv, minval = 5, maxval = 100)
+
+// ── Table ─────────────────────────────────────────────────────────────────────
+grpTbl = "Table"
+inShowTable   = input.bool(true, "Show PIVOT Table",   group = grpTbl)
+inShowLegend  = input.bool(true, "Show Legend",        group = grpTbl)
+inTablePos    = input.string("Bottom Left", "Position",
+                              options = ["Top Left","Top Right","Bottom Left","Bottom Right"],
+                              group = grpTbl)
+
+// ── Glowing Candles ───────────────────────────────────────────────────────────
+grpGlow = "Glowing Candles"
+inEnGlow      = input.bool(true,  "Enable Glow Effect",    group = grpGlow)
+inGlowAtrMult = input.float(1.5,  "ATR Spike Mult",        group = grpGlow, step = 0.1, minval = 1.0, maxval = 5.0)
+inGlowRsiHigh = input.float(80.0, "RSI High Threshold",    group = grpGlow, minval = 60, maxval = 99)
+inGlowRsiLow  = input.float(20.0, "RSI Low Threshold",     group = grpGlow, maxval = 40, minval = 1)
+inGlowVolMult = input.float(2.5,  "Vol Climax Mult",       group = grpGlow, step = 0.1, minval = 1.5, maxval = 10.0)
+inGlowBoxAlpha= input.int(90,     "Glow Box Alpha",        group = grpGlow, minval = 70, maxval = 99)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColBos    = input.color(color.rgb(60,  220, 255), "BOS Glow",       group = grpCol)
+inColChoch  = input.color(color.rgb(255, 210, 60),  "CHoCH Glow",     group = grpCol)
+inColVolC   = input.color(color.rgb(255, 80,  80),  "Vol Climax Bear",group = grpCol)
+inColVolCB  = input.color(color.rgb(60,  255, 160), "Vol Climax Bull",group = grpCol)
+inColAtrS   = input.color(color.rgb(255, 255, 255), "ATR Spike",      group = grpCol)
+inColRsiH   = input.color(color.rgb(200, 80,  255), "RSI Extreme",    group = grpCol)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+fSafeDiv(a, b) => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
+
+fPivotTypeStr(t) =>
+    t ==  2 ? "HH" : t ==  3 ? "HL" : t ==  1 ? "PH" :
+     t == -2 ? "LH" : t == -3 ? "LL" : t == -1 ? "PL" : "?"
+
+fSmcStr(s) =>
+    s ==  1 ? "BOS↑" : s == -1 ? "BOS↓" :
+     s ==  2 ? "CHoC↑": s == -2 ? "CHoC↓": "—"
+
+fTablePosition(p) =>
+    p == "Top Left"     ? position.top_left     :
+     p == "Top Right"    ? position.top_right    :
+     p == "Bottom Right" ? position.bottom_right :
+     position.bottom_left
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  INDICATOR COMPUTATIONS
+// ════════════════════════════════════════════════════════════════════════════
+atr      = ta.atr(inAtrLen)
+atrAvg   = ta.sma(atr, 50)
+rsiVal   = ta.rsi(close, 14)
+volAvg   = ta.sma(volume, 20)
+isBull   = close >= open
+
+// ── Events ────────────────────────────────────────────────────────────────────
+isAtrSpike   = atr > atrAvg * inGlowAtrMult
+isVolClimax  = volume > volAvg * inGlowVolMult
+isRsiHigh    = rsiVal >= inGlowRsiHigh
+isRsiLow     = rsiVal <= inGlowRsiLow
+
+// ── Structure ─────────────────────────────────────────────────────────────────
+ph = ta.pivothigh(high, inPivLeft, inPivRight)
+pl = ta.pivotlow(low,  inPivLeft, inPivRight)
+
+var float lastPH   = na
+var float prevPH   = na
+var float lastPL   = na
+var float prevPL   = na
+var int   structDir = 0
+
+if not na(ph)
+    prevPH    := lastPH
+    lastPH    := ph
+    structDir := not na(prevPH) and ph > prevPH ? 1 : not na(prevPH) and ph < prevPH ? -1 : structDir
+
+if not na(pl)
+    prevPL    := lastPL
+    lastPL    := pl
+    structDir := not na(prevPL) and pl > prevPL ? 1 : not na(prevPL) and pl < prevPL ? -1 : structDir
+
+isBOS   = not na(ph) and not na(prevPH) and ph > prevPH
+isBOSB  = not na(pl) and not na(prevPL) and pl < prevPL
+isCHOCH = not na(pl) and not na(prevPL) and pl > prevPL and structDir < 0
+isCHOCHB= not na(ph) and not na(prevPH) and ph < prevPH and structDir > 0
+
+smcEvent = isCHOCH  ? SMC_CHOCH_BULL :
+           isBOS    ? SMC_BOS_BULL   :
+           isCHOCHB ? SMC_CHOCH_BEAR :
+           isBOSB   ? SMC_BOS_BEAR   :
+           SMC_NONE
+
+pivType = not na(ph) ?
+            (not na(prevPH) and ph > prevPH ? PIVOT_HH : not na(prevPH) and ph < prevPH ? PIVOT_LH : PIVOT_HIGH) :
+          not na(pl) ?
+            (not na(prevPL) and pl > prevPL ? PIVOT_HL : not na(prevPL) and pl < prevPL ? PIVOT_LL : PIVOT_LOW) :
+          0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  PIVOT EVENT REGISTRY
+// ════════════════════════════════════════════════════════════════════════════
+var int[]   evtBar   = array.new_int()
+var float[] evtPrice = array.new_float()
+var int[]   evtType  = array.new_int()
+var int[]   evtSmc   = array.new_int()
+var float[] evtAtrR  = array.new_float()
+var float[] evtVolR  = array.new_float()
+var string[]evtSess  = array.new_string()
+
+if not na(ph) or not na(pl)
+    pivPx  = not na(ph) ? ph  : pl
+    pivBar = bar_index - inPivRight
+    atrR   = fSafeDiv(math.abs(pivPx - (not na(ph) ? low[inPivRight] : high[inPivRight])), atr)
+    volR   = fSafeDiv(volume[inPivRight], volAvg)
+    sessTxt = "—"
+
+    array.unshift(evtBar,   pivBar)
+    array.unshift(evtPrice, pivPx)
+    array.unshift(evtType,  pivType)
+    array.unshift(evtSmc,   smcEvent)
+    array.unshift(evtAtrR,  atrR)
+    array.unshift(evtVolR,  volR)
+    array.unshift(evtSess,  sessTxt)
+
+    while array.size(evtBar) > inTableRows
+        array.pop(evtBar);  array.pop(evtPrice); array.pop(evtType)
+        array.pop(evtSmc);  array.pop(evtAtrR);  array.pop(evtVolR)
+        array.pop(evtSess)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  PIVOT MACRO TABLE
+// ════════════════════════════════════════════════════════════════════════════
+var table pivTable = table.new(position.bottom_left, 8, 1,
+                               border_width = 1,
+                               frame_color  = color.new(color.gray, 60),
+                               bgcolor      = color.new(color.black, 75))
+
+fPivotTableBuild() =>
+    tPos = fTablePosition(inTablePos)
+    // Recreate on position change is not needed — table position is fixed at creation.
+    // Add header row
+    hdr = array.from("Bar", "Price", "Type", "SMC", "ATR×", "Vol×", "Age", "Sess")
+    hdrColors = array.from(color.gray, color.gray, color.gray, color.gray,
+                            color.gray, color.gray, color.gray, color.gray)
+    for c = 0 to 7
+        table.cell(pivTable, c, 0,
+                   array.get(hdr, c),
+                   text_color = color.new(color.gray, 20),
+                   bgcolor    = color.new(color.black, 60),
+                   text_size  = size.tiny)
+    // Data rows
+    n = array.size(evtBar)
+    for r = 0 to inTableRows - 1
+        if r < n
+            b   = array.get(evtBar,   r)
+            px  = array.get(evtPrice, r)
+            typ = array.get(evtType,  r)
+            smc = array.get(evtSmc,   r)
+            aR  = array.get(evtAtrR,  r)
+            vR  = array.get(evtVolR,  r)
+            age = bar_index - b
+            sess= array.get(evtSess,  r)
+
+            typeStr = fPivotTypeStr(typ)
+            smcStr  = fSmcStr(smc)
+            tCol    = typ > 0 ? color.lime : color.red
+            sCol    = smc > 0 ? color.new(inColBos,  10) : smc < 0 ? color.new(color.red, 10) : color.gray
+            row = r + 1
+            table.cell(pivTable, 0, row, str.tostring(b),              text_color = color.gray, bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 1, row, str.tostring(px, format.mintick), text_color = tCol,   bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 2, row, typeStr,                       text_color = tCol,       bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 3, row, smcStr,                        text_color = sCol,       bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 4, row, str.tostring(aR, "#.1") + "x", text_color = color.gray, bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 5, row, str.tostring(vR, "#.1") + "x", text_color = vR > 2 ? color.yellow : color.gray, bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 6, row, str.tostring(age),             text_color = color.gray, bgcolor = color.new(color.black, 80), text_size = size.tiny)
+            table.cell(pivTable, 7, row, sess,                          text_color = color.gray, bgcolor = color.new(color.black, 80), text_size = size.tiny)
+        else
+            for c = 0 to 7
+                table.cell(pivTable, c, r + 1, "", bgcolor = color.new(color.black, 85))
+
+if barstate.islast and inShowTable
+    fPivotTableBuild()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  LEGEND TABLE
+// ════════════════════════════════════════════════════════════════════════════
+var table legend = table.new(position.bottom_right, 3, 9, border_width = 1,
+                             bgcolor = color.new(color.black, 75))
+
+if barstate.islast and inShowLegend
+    table.cell(legend, 0, 0, "Event",   text_color = color.gray, bgcolor = color.new(color.black, 60), text_size = size.tiny)
+    table.cell(legend, 1, 0, "Colour",  text_color = color.gray, bgcolor = color.new(color.black, 60), text_size = size.tiny)
+    table.cell(legend, 2, 0, "Trigger", text_color = color.gray, bgcolor = color.new(color.black, 60), text_size = size.tiny)
+
+    rows = array.from("BOS ↑", "CHoCH ↑", "Vol Climax ↑", "Vol Climax ↓", "ATR Spike", "RSI Extreme", "Pivot High", "Pivot Low")
+    cols = array.from(inColBos, inColChoch, inColVolCB, inColVolC, inColAtrS, inColRsiH,
+                      color.lime, color.red)
+    desc = array.from("Break of Structure Bull","Change of Character Bull","Vol > " + str.tostring(inGlowVolMult) + "× avg Bull",
+                      "Vol > " + str.tostring(inGlowVolMult) + "× avg Bear", "ATR > " + str.tostring(inGlowAtrMult) + "× avg",
+                      "RSI > " + str.tostring(inGlowRsiHigh) + " or < " + str.tostring(inGlowRsiLow),
+                      "Pivot High detected", "Pivot Low detected")
+
+    for r = 0 to 7
+        c = array.get(cols, r)
+        table.cell(legend, 0, r + 1, array.get(rows, r), text_color = color.new(c, 20), bgcolor = color.new(color.black, 80), text_size = size.tiny)
+        table.cell(legend, 1, r + 1, "■",               text_color = c,                 bgcolor = color.new(color.black, 80), text_size = size.small)
+        table.cell(legend, 2, r + 1, array.get(desc, r), text_color = color.new(c, 40), bgcolor = color.new(color.black, 80), text_size = size.tiny)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [H]  GLOWING CANDLES
+// ════════════════════════════════════════════════════════════════════════════
+var box[] glowBoxes = array.new_box()
+
+// Determine dominant glow event (priority: CHoCH > BOS > VolClim > ATR > RSI)
+glowCol = isCHOCH or isCHOCHB ? inColChoch :
+          isBOS   or isBOSB   ? inColBos   :
+          isVolClimax and isBull  ? inColVolCB :
+          isVolClimax and not isBull ? inColVolC :
+          isAtrSpike             ? inColAtrS  :
+          (isRsiHigh or isRsiLow)? inColRsiH  : na
+
+isGlowing = inEnGlow and not na(glowCol)
+
+if isGlowing
+    // Glow background box spanning this bar
+    gb = box.new(bar_index, high * (1.0 + fSafeDiv(atr, high) * 0.3),
+                 bar_index, low  * (1.0 - fSafeDiv(atr, low)  * 0.3),
+                 xloc = xloc.bar_index,
+                 bgcolor = color.new(glowCol, inGlowBoxAlpha),
+                 border_color = color.new(glowCol, 50),
+                 border_width = 1)
+    array.unshift(glowBoxes, gb)
+    while array.size(glowBoxes) > 200
+        box.delete(array.pop(glowBoxes))
+
+// Bar colour glow
+barcolor(isGlowing ? color.new(glowCol, 30) : na, title = "Glow Bar")
+
+// Outer halo shapes
+plotshape(isGlowing and isBull,  title = "Glow Halo Bull",
+          style = shape.circle, location = location.belowbar,
+          color = na(glowCol) ? na : color.new(glowCol, 55), size = size.large)
+plotshape(isGlowing and not isBull, title = "Glow Halo Bear",
+          style = shape.circle, location = location.abovebar,
+          color = na(glowCol) ? na : color.new(glowCol, 55), size = size.large)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [I]  STRUCTURAL MARKERS
+// ════════════════════════════════════════════════════════════════════════════
+plotshape(isBOS,    title = "BOS Bull",    style = shape.labelup,   location = location.abovebar, color = color.new(inColBos,  20), text = "BOS",  textcolor = inColBos,  size = size.tiny)
+plotshape(isBOSB,   title = "BOS Bear",    style = shape.labeldown, location = location.belowbar, color = color.new(color.red, 20), text = "BOS",  textcolor = color.red, size = size.tiny)
+plotshape(isCHOCH,  title = "CHoCH Bull",  style = shape.labelup,   location = location.abovebar, color = color.new(inColChoch,15), text = "CHoC", textcolor = inColChoch,size = size.small)
+plotshape(isCHOCHB, title = "CHoCH Bear",  style = shape.labeldown, location = location.belowbar, color = color.new(inColChoch,15), text = "CHoC", textcolor = inColChoch,size = size.small)

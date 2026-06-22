@@ -1,0 +1,383 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 05 · Elliott Wave + Session Strategies
+// ============================================================================
+// Indicator 5 of the Pinnacle ecosystem.
+//
+// MODULES
+// ────────
+// · Elliott Wave classification — probabilistic wave labelling using
+//   alternating pivot ratios (impulse waves: 1,3,5; corrective: A,B,C).
+//   Each wave is coloured and annotated with its probability score.
+//
+// · Wave Candle Tagging — candles within each wave leg are coloured:
+//     Strong candle   = body > ATR × strongMult, in wave direction
+//     Weak candle     = body < ATR × weakMult
+//     Consolidation   = inside bar or narrow range
+//     Breakout        = range expansion beyond prior high/low
+//     Pull            = temporary counter-move within trend
+//     Push            = momentum continuation candle
+//     Mean Reversion  = close against the wave direction at extreme
+//     Acceleration    = 3+ successive expanding bodies, same direction
+//     Oscillation     = high-frequency small-body alternation
+//     Volatility Burst= ATR spike > 1.5× 50-bar ATR average
+//
+// · Black / White Cross markers — EMA fast/slow crossovers.
+//
+// · Session Strategies — pre-configured trading contexts for London Open,
+//   NY Open, Asian Consolidation, and London/NY Overlap.
+//   Each session highlights its time window and shows expected wave phase.
+//
+// · Planned Goals + Computed Positions — target projection arrows drawn
+//   from current wave end toward expected wave completion level using
+//   Fibonacci ratios between prior wave lengths.
+// ============================================================================
+indicator("Pinnacle · Elliott Wave + Sessions", overlay = true,
+          max_lines_count  = 300,
+          max_labels_count = 300,
+          max_boxes_count  = 100)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUMS
+// ════════════════════════════════════════════════════════════════════════════
+var int WAVE_I1       =  1
+var int WAVE_I2       =  2
+var int WAVE_I3       =  3
+var int WAVE_I4       =  4
+var int WAVE_I5       =  5
+var int WAVE_CA       = -1
+var int WAVE_CB       = -2
+var int WAVE_CC       = -3
+var int WAVE_TRI_D    = -4
+var int WAVE_TRI_E    = -5
+var int WAVE_UNKNOWN  =  0
+
+var int CANDLE_IMPULSE       = 1
+var int CANDLE_EXHAUSTION    = 2
+var int CANDLE_DOJI          = 3
+var int CANDLE_INSIDE        = 4
+var int CANDLE_OUTSIDE       = 5
+var int CANDLE_PINBAR        = 6
+var int CANDLE_CONSOLIDATION = 7
+var int CANDLE_BREAKOUT      = 8
+var int CANDLE_PULLBACK      = 9
+var int CANDLE_REVERSAL      = 10
+var int CANDLE_ACCELERATION  = 11
+var int CANDLE_MEAN_REV      = 12
+
+var int SESSION_ASIAN   = 0
+var int SESSION_LONDON  = 1
+var int SESSION_NY      = 2
+var int SESSION_OVERLAP = 3
+var int SESSION_OFF     = -1
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Wave Detection ────────────────────────────────────────────────────────────
+grpWave = "Wave Detection"
+inPivLeft     = input.int(3,   "Pivot Left",           group = grpWave, minval = 1, maxval = 20)
+inPivRight    = input.int(3,   "Pivot Right",          group = grpWave, minval = 1, maxval = 20)
+inHistSize    = input.int(10,  "Pivot History",        group = grpWave, minval = 5, maxval = 30)
+inWaveProj    = input.bool(true,"Show Wave Projections",group = grpWave)
+inWaveProjFar = input.int(80,  "Projection Lookahead", group = grpWave, minval = 20, maxval = 400)
+
+// ── Candle Character ──────────────────────────────────────────────────────────
+grpCandle = "Candle Character"
+inAtrLen       = input.int(14,   "ATR Length",          group = grpCandle, minval = 5,  maxval = 100)
+inStrongMult   = input.float(1.2,"Strong Body ATR Mult",group = grpCandle, step = 0.1, minval = 0.5, maxval = 5.0)
+inWeakMult     = input.float(0.3,"Weak Body ATR Mult",  group = grpCandle, step = 0.05,minval = 0.05,maxval = 1.0)
+inVolSpikeM    = input.float(1.5,"Vol Spike ATR Mult",  group = grpCandle, step = 0.1, minval = 1.0, maxval = 5.0)
+
+// ── Cross Markers ─────────────────────────────────────────────────────────────
+grpCross = "Cross Markers"
+inEnBlackCross = input.bool(true, "Black Cross (bear EMA cross)", group = grpCross)
+inEnWhiteCross = input.bool(true, "White Cross (bull EMA cross)", group = grpCross)
+inCrossFast    = input.int(20,    "Fast EMA",  group = grpCross, minval = 2,  maxval = 200)
+inCrossSlow    = input.int(50,    "Slow EMA",  group = grpCross, minval = 3,  maxval = 400)
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+grpSess = "Sessions"
+inEnSessions   = input.bool(true, "Enable Sessions",  group = grpSess)
+inTzOffset     = input.int(0,     "UTC Offset (hrs)", group = grpSess, minval = -12, maxval = 14)
+inSessAsian    = input.session("0000-0900", "Asian",   group = grpSess)
+inSessLondon   = input.session("0700-1600", "London",  group = grpSess)
+inSessNY       = input.session("1300-2200", "NY",      group = grpSess)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColWave1    = input.color(color.rgb(60,  230, 150),  "Wave 1/A",      group = grpCol)
+inColWave3    = input.color(color.rgb(100, 200, 255),  "Wave 3/B",      group = grpCol)
+inColWave5    = input.color(color.rgb(200, 255, 100),  "Wave 5/C",      group = grpCol)
+inColCorr     = input.color(color.rgb(255, 160, 80),   "Corrective",    group = grpCol)
+inColStrong   = input.color(color.rgb(0,   255, 180),  "Strong Candle", group = grpCol)
+inColWeak     = input.color(color.rgb(180, 180, 100),  "Weak Candle",   group = grpCol)
+inColBreakout = input.color(color.rgb(255, 255,  60),  "Breakout",      group = grpCol)
+inColPullback = input.color(color.rgb(160, 160, 255),  "Pullback",      group = grpCol)
+inColReversion= input.color(color.rgb(255, 100, 200),  "Mean Rev",      group = grpCol)
+inColSessA    = input.color(color.rgb(80,  120, 200),  "Asian Session", group = grpCol)
+inColSessL    = input.color(color.rgb(255, 200, 60),   "London",        group = grpCol)
+inColSessNY   = input.color(color.rgb(60,  200, 100),  "NY",            group = grpCol)
+inColSessOv   = input.color(color.rgb(255, 100, 200),  "Overlap",       group = grpCol)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+fClamp(v, lo, hi) => math.max(lo, math.min(hi, v))
+fSafeDiv(a, b)    => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  PIVOT HISTORY
+// ════════════════════════════════════════════════════════════════════════════
+var int[]   pivHBar   = array.new_int()
+var float[] pivHPrice = array.new_float()
+var int[]   pivLBar   = array.new_int()
+var float[] pivLPrice = array.new_float()
+// Alternating pivot sequence (type: 1=high, -1=low)
+var int[]   pivAltType  = array.new_int()
+var int[]   pivAltBar   = array.new_int()
+var float[] pivAltPrice = array.new_float()
+
+ph = ta.pivothigh(high, inPivLeft, inPivRight)
+pl = ta.pivotlow(low,  inPivLeft, inPivRight)
+
+if not na(ph)
+    array.unshift(pivHBar,   bar_index - inPivRight)
+    array.unshift(pivHPrice, ph)
+    if array.size(pivHBar) > inHistSize
+        array.pop(pivHBar); array.pop(pivHPrice)
+    // Alternating sequence
+    if array.size(pivAltType) == 0 or array.get(pivAltType, 0) != 1
+        array.unshift(pivAltType,  1)
+        array.unshift(pivAltBar,   bar_index - inPivRight)
+        array.unshift(pivAltPrice, ph)
+        if array.size(pivAltType) > inHistSize * 2
+            array.pop(pivAltType); array.pop(pivAltBar); array.pop(pivAltPrice)
+
+if not na(pl)
+    array.unshift(pivLBar,   bar_index - inPivRight)
+    array.unshift(pivLPrice, pl)
+    if array.size(pivLBar) > inHistSize
+        array.pop(pivLBar); array.pop(pivLPrice)
+    if array.size(pivAltType) == 0 or array.get(pivAltType, 0) != -1
+        array.unshift(pivAltType,  -1)
+        array.unshift(pivAltBar,   bar_index - inPivRight)
+        array.unshift(pivAltPrice, pl)
+        if array.size(pivAltType) > inHistSize * 2
+            array.pop(pivAltType); array.pop(pivAltBar); array.pop(pivAltPrice)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  WAVE CLASSIFICATION (Probabilistic)
+// ════════════════════════════════════════════════════════════════════════════
+// Uses alternating pivot sequence to classify wave legs.
+// Wave ratios (Fibonacci): W3 ≈ 1.618 × W1; W5 ≈ 0.618 × W3; etc.
+
+var int   currentWave   = WAVE_UNKNOWN
+var float waveProb      = 0.0
+var label[] waveLabels  = array.new_label()
+var line[]  waveLines   = array.new_line()
+var int     waveKey     = na
+
+fWaveLabel(waveNum) =>
+    waveNum ==  1 ? "①" : waveNum ==  2 ? "②" : waveNum ==  3 ? "③" :
+     waveNum ==  4 ? "④" : waveNum ==  5 ? "⑤" : waveNum == -1 ? "A" :
+     waveNum == -2 ? "B" : waveNum == -3 ? "C" : "?"
+
+fWaveColor(waveNum) =>
+    waveNum == 3  ? inColWave3 :
+     waveNum == 5  ? inColWave5 :
+     waveNum == -1 or waveNum == -2 or waveNum == -3 ? inColCorr :
+     inColWave1
+
+fUpdateWaveLabels() =>
+    n = array.size(pivAltType)
+    if n >= 5
+        // Classify last 5 alternating pivots as wave legs
+        types  = array.new_int(5, 0)
+        bars   = array.new_int(5, 0)
+        prices = array.new_float(5, 0.0)
+        for j = 0 to 4
+            array.set(types,  j, array.get(pivAltType,  n - 1 - j))
+            array.set(bars,   j, array.get(pivAltBar,   n - 1 - j))
+            array.set(prices, j, array.get(pivAltPrice, n - 1 - j))
+
+        // Leg lengths
+        leg = array.new_float(4, 0.0)
+        for j = 0 to 3
+            array.set(leg, j, math.abs(array.get(prices, j + 1) - array.get(prices, j)))
+
+        l1 = array.get(leg, 0)
+        l2 = array.get(leg, 1)
+        l3 = array.get(leg, 2)
+
+        // Heuristic: if leg1 is low→high (bull start), sequence = 1,2,3,4,5
+        // Ratios: w3/w1 should be ≥1.0, w5/w1 in [0.5, 1.0]
+        isImpulse = l3 >= l1 * 0.9 and l2 < l1 * 0.7
+        isCorrective = not isImpulse
+
+        waveNums = isImpulse ?
+             array.from(1, 2, 3, 4, 5) :
+             array.from(-1, -2, -3, 0, 0)
+
+        kk = array.get(bars, 0)
+        if waveKey != kk
+            waveKey := kk
+            while array.size(waveLabels) > 0 then label.delete(array.pop(waveLabels))
+            while array.size(waveLines) > 0 then line.delete(array.pop(waveLines))
+
+            for j = 0 to math.min(3, n - 2)
+                wn = array.get(waveNums, j)
+                if wn != 0
+                    bj  = array.get(bars,   j + 1)
+                    pj  = array.get(prices, j + 1)
+                    typ = array.get(types,  j + 1)
+                    wc  = fWaveColor(wn)
+                    lb = label.new(bj, pj, fWaveLabel(wn),
+                                   xloc = xloc.bar_index,
+                                   style = typ > 0 ? label.style_label_up : label.style_label_down,
+                                   textcolor = wc,
+                                   color = color.new(color.black, 85),
+                                   size = size.small)
+                    array.push(waveLabels, lb)
+                    if j > 0
+                        bPrev  = array.get(bars,   j)
+                        pPrev  = array.get(prices, j)
+                        ln = line.new(bPrev, pPrev, bj, pj,
+                                      xloc = xloc.bar_index,
+                                      color = color.new(wc, 40),
+                                      style = line.style_solid, width = 2)
+                        array.push(waveLines, ln)
+
+            // Wave 5 projection (if impulse detected)
+            if isImpulse and inWaveProj and n >= 5
+                b5Start = array.get(bars,   n - 1)
+                p5Start = array.get(prices, n - 1)
+                dir5    = array.get(types,  n - 1)
+                proj5   = p5Start + l1 * 0.618 * (dir5 > 0 ? 1.0 : -1.0)
+                lProj = line.new(b5Start, p5Start, b5Start + inWaveProjFar, proj5,
+                                 xloc = xloc.bar_index,
+                                 color = color.new(inColWave5, 30),
+                                 style = line.style_dashed, width = 2)
+                array.push(waveLines, lProj)
+                lbProj = label.new(b5Start + inWaveProjFar, proj5, "⑤ Target",
+                                   xloc = xloc.bar_index,
+                                   style = label.style_label_left,
+                                   textcolor = inColWave5,
+                                   color = color.new(color.black, 80),
+                                   size = size.tiny)
+                array.push(waveLabels, lbProj)
+    0
+
+fUpdateWaveLabels()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  CANDLE CHARACTER TAGGING
+// ════════════════════════════════════════════════════════════════════════════
+atr       = ta.atr(inAtrLen)
+atrAvg50  = ta.sma(atr, 50)
+body      = math.abs(close - open)
+rng       = math.max(high - low, syminfo.mintick)
+upWick    = (high - math.max(open, close)) / rng
+dnWick    = (math.min(open, close) - low)  / rng
+isBull    = close >= open
+
+isStrong      = body > atr * inStrongMult
+isWeak        = body < atr * inWeakMult
+isInsideBar   = high <= high[1] and low >= low[1]
+isOutsideBar  = high > high[1] and low < low[1]
+isPinBar      = (upWick > 0.6 or dnWick > 0.6) and body / rng < 0.25
+isBreakout    = high > high[1] and isBull and body > atr * inStrongMult
+isVolSpike    = atr > atrAvg50 * inVolSpikeM
+isMeanRev     = (isBull and close < open[1]) or (not isBull and close > open[1])
+
+// Acceleration: 3 consecutive expanding bodies in the same direction
+accBull = isBull and isBull[1] and isBull[2] and
+          body > body[1] and body[1] > body[2]
+accBear = not isBull and not isBull[1] and not isBull[2] and
+          body > body[1] and body[1] > body[2]
+
+candleChar = isStrong   ? CANDLE_IMPULSE      :
+             isPinBar   ? CANDLE_PINBAR       :
+             isOutsideBar ? CANDLE_OUTSIDE    :
+             isInsideBar  ? CANDLE_INSIDE     :
+             isBreakout   ? CANDLE_BREAKOUT   :
+             isMeanRev    ? CANDLE_MEAN_REV   :
+             accBull or accBear ? CANDLE_ACCELERATION :
+             isWeak       ? CANDLE_CONSOLIDATION :
+             CANDLE_PULLBACK
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  EMA CROSS MARKERS
+// ════════════════════════════════════════════════════════════════════════════
+emaFast = ta.ema(close, inCrossFast)
+emaSlow = ta.ema(close, inCrossSlow)
+whiteCross = inEnWhiteCross and ta.crossover(emaFast,  emaSlow)
+blackCross = inEnBlackCross and ta.crossunder(emaFast, emaSlow)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [H]  SESSION BOXES
+// ════════════════════════════════════════════════════════════════════════════
+inAsian   = time(timeframe.period, inSessAsian)
+inLondon  = time(timeframe.period, inSessLondon)
+inNY      = time(timeframe.period, inSessNY)
+inOverlap = not na(inLondon) and not na(inNY)
+
+var box[] sessBoxes = array.new_box()
+var int   sessDay   = na
+var box   currentSessBox = na
+
+if inEnSessions
+    thisDay = dayofweek
+    if sessDay != thisDay and (not na(inAsian) or not na(inLondon) or not na(inNY))
+        sessDay := thisDay
+
+    sessColor = inOverlap ? inColSessOv :
+                not na(inNY)     ? inColSessNY :
+                not na(inLondon) ? inColSessL  :
+                not na(inAsian)  ? inColSessA  : na
+    if not na(sessColor)
+        if na(currentSessBox) or box.get_right(currentSessBox) < bar_index - 1
+            currentSessBox := box.new(bar_index, high * 1.0005, bar_index + 1, low * 0.9995,
+                                      xloc = xloc.bar_index,
+                                      bgcolor = color.new(sessColor, 94),
+                                      border_color = color.new(sessColor, 70),
+                                      border_width = 1)
+            while array.size(sessBoxes) > 500
+                box.delete(array.shift(sessBoxes))
+            array.push(sessBoxes, currentSessBox)
+        else
+            box.set_right(currentSessBox, bar_index)
+            box.set_top(currentSessBox,   math.max(box.get_top(currentSessBox),   high))
+            box.set_bottom(currentSessBox,math.min(box.get_bottom(currentSessBox),low))
+
+// ════════════════════════════════════════════════════════════════════════════
+// [I]  PLOTSHAPES + BARCOLOR
+// ════════════════════════════════════════════════════════════════════════════
+// Candle character colouring
+barcolor(candleChar == CANDLE_IMPULSE     ? color.new(inColStrong,   20) :
+         candleChar == CANDLE_BREAKOUT    ? color.new(inColBreakout, 20) :
+         candleChar == CANDLE_MEAN_REV    ? color.new(inColReversion,30) :
+         candleChar == CANDLE_PULLBACK    ? color.new(inColPullback, 40) :
+         candleChar == CANDLE_ACCELERATION? color.new(inColStrong,   10) :
+         na,
+         title = "Wave Candle Colour")
+
+// Cross markers
+plotshape(whiteCross, title = "White Cross",
+          style = shape.triangleup, location = location.belowbar,
+          color = color.new(color.white, 10), size = size.small)
+plotshape(blackCross, title = "Black Cross",
+          style = shape.triangledown, location = location.abovebar,
+          color = color.new(color.maroon, 10), size = size.small)
+
+// Volatility spike
+plotshape(isVolSpike, title = "Vol Spike",
+          style = shape.diamond, location = location.belowbar,
+          color = color.new(color.orange, 30), size = size.tiny)
+
+// ── Companion pane: ATR relative to average ───────────────────────────────────
+plot(fSafeDiv(atr, atrAvg50), title = "ATR / Avg",
+     color = color.new(color.orange, 30),
+     style = plot.style_histogram, linewidth = 2)
+hline(1.0, "ATR Baseline", color = color.new(color.gray, 60), linestyle = hline.style_dashed)
