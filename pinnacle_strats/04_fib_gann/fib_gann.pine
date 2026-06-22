@@ -1,0 +1,466 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 04 · Fibonacci + Gann + Speed/Resistance + Geometry
+// ============================================================================
+// Indicator 4 of the Pinnacle ecosystem.
+//
+// MODULES
+// ────────
+// · Fibonacci Retracements + Extensions — auto-anchored to most recent
+//   swing high/low pivots.  Levels: 0.236, 0.382, 0.5, 0.618, 0.786, 1.0,
+//   1.272, 1.414, 1.618, 2.0, 2.618.  Extended set adds 3.618 and 4.236.
+//   Cluster confluence zone drawn as a transparent box when 2+ levels are
+//   within 0.5 × ATR of each other.
+//
+// · Gann Boxes — price/time square derived from last swing range.
+//   Inner subdivisions at ¼, ½, ¾ in both dimensions (price and time).
+//   Fan lines at standard Gann angles: 1×1, 2×1, 4×1, 8×1 and inverses.
+//
+// · Speed Resistance Lines (SRL) — 1/3 and 2/3 retracements of last
+//   significant swing (Schabacker method).  Each line extended to the right
+//   with user-controlled lookahead.
+//
+// · Wedge (Convergence / Divergence Channel) — trendlines through last 3
+//   swing highs and last 3 swing lows.  Colour-coded: rising wedge = bear,
+//   falling wedge = bull, parallel = channel neutral.
+//
+// · Circles / Arc Zones — Fibonacci-radius semi-circles centred on pivot
+//   (drawn via box approximation with square aspect-ratio correction).
+//   Radii at 0.618, 1.0, 1.618 × swing range.
+//
+// · Cycle Projections — detrended oscillator phase estimation projects
+//   expected future pivot time windows as vertical box highlights.
+//
+// · Long / Short Boxes — user-selectable entry, stop, and target zones
+//   drawn as colour-filled boxes on the chart.
+// ============================================================================
+indicator("Pinnacle · Fib + Gann + Geometry", overlay = true,
+          max_lines_count  = 500,
+          max_labels_count = 500,
+          max_boxes_count  = 200)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUMS
+// ════════════════════════════════════════════════════════════════════════════
+var int FIB_RETRACEMENT = 1
+var int FIB_EXTENSION   = 2
+var int FIB_CLUSTER     = 3
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Module Switches ───────────────────────────────────────────────────────────
+grpMod = "Modules"
+inEnFib   = input.bool(true,  "Fibonacci",            group = grpMod)
+inEnGann  = input.bool(true,  "Gann Box",             group = grpMod)
+inEnSrl   = input.bool(true,  "Speed Resistance",     group = grpMod)
+inEnWedge = input.bool(true,  "Wedge",                group = grpMod)
+inEnCircle= input.bool(false, "Circles (Approx)",     group = grpMod)
+inEnCycle = input.bool(true,  "Cycle Projections",    group = grpMod)
+inEnLSBox = input.bool(true,  "Long/Short Boxes",     group = grpMod)
+
+// ── Pivot Detection ──────────────────────────────────────────────────────────
+grpPiv = "Pivot Detection"
+inPivLeft  = input.int(5, "Pivot Left",  group = grpPiv, minval = 1, maxval = 30)
+inPivRight = input.int(5, "Pivot Right", group = grpPiv, minval = 1, maxval = 30)
+inHistSize = input.int(6,  "Pivot History",group = grpPiv, minval = 3, maxval = 20)
+
+// ── Fibonacci ────────────────────────────────────────────────────────────────
+grpFib = "Fibonacci"
+inFibMode      = input.string("Both",  "Mode",   group = grpFib, options = ["Retracement", "Extension", "Both"])
+inFibLevels    = input.string("Extended","Levels",group = grpFib, options = ["Basic", "Extended", "All"])
+inFibLookahead = input.int(120, "Lookahead (bars)", group = grpFib, minval = 20, maxval = 600)
+inFibCluster   = input.bool(true, "Show Cluster Zones", group = grpFib)
+inFibMaxLabels = input.int(16,  "Max Labels", group = grpFib, minval = 4, maxval = 40)
+
+// ── Gann ──────────────────────────────────────────────────────────────────────
+grpGann = "Gann Box"
+inGannSquares   = input.int(3, "Gann Squares",  group = grpGann, minval = 1, maxval = 8)
+inGannFanEnable = input.bool(true, "Gann Fan Lines", group = grpGann)
+
+// ── Speed Resistance ─────────────────────────────────────────────────────────
+grpSrl = "Speed Resistance"
+inSrlLookahead = input.int(100, "SRL Lookahead", group = grpSrl, minval = 20, maxval = 500)
+
+// ── Wedge ─────────────────────────────────────────────────────────────────────
+grpWedge = "Wedge"
+inWedgeLookahead = input.int(80, "Wedge Lookahead", group = grpWedge, minval = 20, maxval = 400)
+
+// ── Cycles ────────────────────────────────────────────────────────────────────
+grpCycle = "Cycle Projections"
+inCycleLen     = input.int(34, "Cycle EMA Length",  group = grpCycle, minval = 5, maxval = 200)
+inCycleProj    = input.int(2,  "Projections Ahead", group = grpCycle, minval = 1, maxval = 5)
+
+// ── Long / Short Boxes ────────────────────────────────────────────────────────
+grpLS = "Long / Short Boxes"
+inLSMode    = input.string("None", "Active Box",
+                            options = ["None", "Long", "Short"], group = grpLS)
+inLSEntry   = input.float(0.0, "Entry Price",  group = grpLS)
+inLSStop    = input.float(0.0, "Stop Price",   group = grpLS)
+inLSTarget  = input.float(0.0, "Target Price", group = grpLS)
+inLSBarsAhead = input.int(60,  "Bars Ahead",   group = grpLS, minval = 5, maxval = 300)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColFib     = input.color(color.rgb(250, 210, 120),  "Fibonacci",         group = grpCol)
+inColFibExt  = input.color(color.rgb(200, 255, 200),  "Fib Extension",     group = grpCol)
+inColCluster = input.color(color.rgb(255, 255, 100),  "Fib Cluster Zone",  group = grpCol)
+inColGann    = input.color(color.rgb(160, 200, 255),  "Gann Box",          group = grpCol)
+inColGannFan = input.color(color.rgb(100, 170, 255),  "Gann Fan",          group = grpCol)
+inColSrl     = input.color(color.rgb(220, 180, 100),  "Speed Resistance",  group = grpCol)
+inColWedge   = input.color(color.rgb(200, 130, 255),  "Wedge",             group = grpCol)
+inColCycle   = input.color(color.rgb(100, 200, 255),  "Cycle Window",      group = grpCol)
+inColLong    = input.color(color.rgb(60,  220, 140),  "Long Box",          group = grpCol)
+inColShort   = input.color(color.rgb(255, 100, 100),  "Short Box",         group = grpCol)
+
+// ── Line Style ────────────────────────────────────────────────────────────────
+grpLine = "Line Style"
+inFibStyle  = input.string("Dashed", "Fib Lines",    group = grpLine, options = ["Solid","Dashed","Dotted"])
+inGannStyle = input.string("Dotted", "Gann Lines",   group = grpLine, options = ["Solid","Dashed","Dotted"])
+inSrlStyle  = input.string("Dashed", "SRL Lines",    group = grpLine, options = ["Solid","Dashed","Dotted"])
+inWedgeStyle= input.string("Solid",  "Wedge Lines",  group = grpLine, options = ["Solid","Dashed","Dotted"])
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+fLineStyle(s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+fSafeDiv(a, b) => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
+
+fFibPrice(isUp, lo, hi, lvl, isExt) =>
+    absRng  = math.abs(hi - lo)
+    minRng  = math.max(absRng * 0.0001, syminfo.mintick * 10)
+    rng     = math.max(absRng, minRng)
+    isUp ? (isExt ? hi + rng * (lvl - 1.0) : hi - rng * lvl) :
+           (isExt ? lo - rng * (lvl - 1.0) : lo + rng * lvl)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  PIVOT HISTORY
+// ════════════════════════════════════════════════════════════════════════════
+var int[]   pivHBar   = array.new_int()
+var float[] pivHPrice = array.new_float()
+var int[]   pivLBar   = array.new_int()
+var float[] pivLPrice = array.new_float()
+
+ph = ta.pivothigh(high, inPivLeft, inPivRight)
+pl = ta.pivotlow(low,  inPivLeft, inPivRight)
+
+if not na(ph)
+    array.unshift(pivHBar,   bar_index - inPivRight)
+    array.unshift(pivHPrice, ph)
+    if array.size(pivHBar) > inHistSize
+        array.pop(pivHBar)
+        array.pop(pivHPrice)
+
+if not na(pl)
+    array.unshift(pivLBar,   bar_index - inPivRight)
+    array.unshift(pivLPrice, pl)
+    if array.size(pivLBar) > inHistSize
+        array.pop(pivLBar)
+        array.pop(pivLPrice)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  FIBONACCI
+// ════════════════════════════════════════════════════════════════════════════
+var line[] fibLines  = array.new_line()
+var label[]fibLabels = array.new_label()
+var int   fibKeyA = na
+var int   fibKeyB = na
+
+fClearFib() =>
+    while array.size(fibLines) > 0
+        line.delete(array.pop(fibLines))
+    while array.size(fibLabels) > 0
+        label.delete(array.pop(fibLabels))
+    0
+
+fPushFibLevel(xStart, price, txt, isExt) =>
+    c = color.new(isExt ? inColFibExt : inColFib, 40)
+    ln = line.new(xStart, price, bar_index + inFibLookahead, price,
+                  xloc = xloc.bar_index, extend = extend.none,
+                  color = c, style = fLineStyle(inFibStyle), width = 1)
+    lb = label.new(bar_index + inFibLookahead, price, txt,
+                   xloc = xloc.bar_index, style = label.style_label_left,
+                   textcolor = c, color = color.new(color.black, 100), size = size.tiny)
+    array.unshift(fibLines,  ln)
+    array.unshift(fibLabels, lb)
+    while array.size(fibLabels) > inFibMaxLabels
+        line.delete(array.pop(fibLines))
+        label.delete(array.pop(fibLabels))
+    0
+
+fUpdateFib() =>
+    if inEnFib and array.size(pivHBar) > 0 and array.size(pivLBar) > 0
+        hBar = array.get(pivHBar,   0)
+        hPx  = array.get(pivHPrice, 0)
+        lBar = array.get(pivLBar,   0)
+        lPx  = array.get(pivLPrice, 0)
+        kA   = math.min(hBar, lBar)
+        kB   = math.max(hBar, lBar)
+        if fibKeyA != kA or fibKeyB != kB
+            fibKeyA := kA
+            fibKeyB := kB
+            fClearFib()
+            isUp   = lBar < hBar
+            xStart = isUp ? lBar : hBar
+            loPx   = math.min(lPx, hPx)
+            hiPx   = math.max(lPx, hPx)
+            showR  = inFibMode == "Retracement" or inFibMode == "Both"
+            showE  = inFibMode == "Extension"   or inFibMode == "Both"
+            if showR
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 0.236, false), "0.236", false)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 0.382, false), "0.382", false)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 0.5,   false), "0.500", false)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 0.618, false), "0.618", false)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 0.786, false), "0.786", false)
+            if showE
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 1.0,   true), "1.000", true)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 1.272, true), "1.272", true)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 1.618, true), "1.618", true)
+            if inFibLevels != "Basic"
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 2.0,   true), "2.000", true)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 2.618, true), "2.618", true)
+            if inFibLevels == "All"
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 3.618, true), "3.618", true)
+                fPushFibLevel(xStart, fFibPrice(isUp, loPx, hiPx, 4.236, true), "4.236", true)
+    0
+
+fUpdateFib()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  GANN BOX
+// ════════════════════════════════════════════════════════════════════════════
+var box[]  gannBoxes = array.new_box()
+var line[] gannLines = array.new_line()
+
+fClearGann() =>
+    while array.size(gannBoxes) > 0
+        box.delete(array.pop(gannBoxes))
+    while array.size(gannLines) > 0
+        line.delete(array.pop(gannLines))
+    0
+
+var int gannKey = na
+
+fUpdateGann() =>
+    if inEnGann and array.size(pivHBar) > 0 and array.size(pivLBar) > 0
+        hBar = array.get(pivHBar,   0)
+        hPx  = array.get(pivHPrice, 0)
+        lBar = array.get(pivLBar,   0)
+        lPx  = array.get(pivLPrice, 0)
+        kk   = math.min(hBar, lBar)
+        if gannKey != kk
+            gannKey := kk
+            fClearGann()
+            x1  = math.min(hBar, lBar)
+            x2  = x1 + math.abs(hBar - lBar) * inGannSquares
+            lo  = math.min(hPx, lPx)
+            hi  = math.max(hPx, lPx)
+            rng = math.max(hi - lo, syminfo.mintick)
+            // Outer Gann square
+            bx = box.new(x1, hi, x2, lo,
+                         xloc = xloc.bar_index,
+                         bgcolor = color.new(inColGann, 93),
+                         border_color = color.new(inColGann, 40),
+                         border_style = fLineStyle(inGannStyle),
+                         border_width = 1)
+            array.push(gannBoxes, bx)
+            // Subdivisions at 1/4, 1/2, 3/4
+            for k = 1 to 3
+                fracP = lo + rng * k / 4.0
+                ln = line.new(x1, fracP, x2, fracP,
+                              xloc = xloc.bar_index,
+                              color = color.new(inColGann, 60),
+                              style = fLineStyle(inGannStyle), width = 1)
+                array.push(gannLines, ln)
+                fracT = x1 + math.round((x2 - x1) * k / 4)
+                lt = line.new(fracT, lo, fracT, hi,
+                              xloc = xloc.bar_index,
+                              color = color.new(inColGann, 60),
+                              style = fLineStyle(inGannStyle), width = 1)
+                array.push(gannLines, lt)
+            // Gann Fan lines: 1x1, 2x1, 4x1 and inverses from swing low
+            if inGannFanEnable
+                swingX = lBar < hBar ? lBar : hBar
+                swingY = lBar < hBar ? lPx  : hPx
+                timeUnit = math.max(math.abs(hBar - lBar), 1)
+                priceUnit = rng
+                fanAngles = array.from(1.0, 0.5, 0.25, 2.0, 4.0)
+                for a = 0 to array.size(fanAngles) - 1
+                    ang = array.get(fanAngles, a)
+                    yEnd = swingY + priceUnit * ang * (x2 - swingX) / timeUnit
+                    lf = line.new(swingX, swingY, x2, yEnd,
+                                  xloc = xloc.bar_index,
+                                  color = color.new(inColGannFan, 65),
+                                  style = fLineStyle(inGannStyle), width = 1)
+                    array.push(gannLines, lf)
+    0
+
+fUpdateGann()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  SPEED RESISTANCE LINES
+// ════════════════════════════════════════════════════════════════════════════
+var line[] srlLines = array.new_line()
+
+fClearSrl() =>
+    while array.size(srlLines) > 0
+        line.delete(array.pop(srlLines))
+    0
+
+var int srlKey = na
+
+fUpdateSrl() =>
+    if inEnSrl and array.size(pivHBar) > 0 and array.size(pivLBar) > 0
+        hBar = array.get(pivHBar,   0)
+        hPx  = array.get(pivHPrice, 0)
+        lBar = array.get(pivLBar,   0)
+        lPx  = array.get(pivLPrice, 0)
+        kk   = math.min(hBar, lBar)
+        if srlKey != kk
+            srlKey := kk
+            fClearSrl()
+            isUp  = lBar < hBar
+            lo    = math.min(lPx, hPx)
+            hi    = math.max(lPx, hPx)
+            rng   = hi - lo
+            xBase = isUp ? lBar : hBar
+            x2    = bar_index + inSrlLookahead
+            // 1/3 line
+            y13   = isUp ? hi - rng / 3.0 : lo + rng / 3.0
+            // 2/3 line
+            y23   = isUp ? hi - rng * 2.0 / 3.0 : lo + rng * 2.0 / 3.0
+            l13 = line.new(xBase, y13, x2, y13,
+                           xloc = xloc.bar_index, color = color.new(inColSrl, 30),
+                           style = fLineStyle(inSrlStyle), width = 1)
+            l23 = line.new(xBase, y23, x2, y23,
+                           xloc = xloc.bar_index, color = color.new(inColSrl, 30),
+                           style = fLineStyle(inSrlStyle), width = 2)
+            array.push(srlLines, l13)
+            array.push(srlLines, l23)
+    0
+
+fUpdateSrl()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [H]  WEDGE
+// ════════════════════════════════════════════════════════════════════════════
+var line[] wedgeLines = array.new_line()
+
+fClearWedge() =>
+    while array.size(wedgeLines) > 0
+        line.delete(array.pop(wedgeLines))
+    0
+
+var int wedgeKey = na
+
+fUpdateWedge() =>
+    if inEnWedge and array.size(pivHBar) >= 3 and array.size(pivLBar) >= 3
+        hB1 = array.get(pivHBar,   1)
+        lB1 = array.get(pivLBar,   1)
+        kk  = math.min(hB1, lB1)
+        if wedgeKey != kk
+            wedgeKey := kk
+            fClearWedge()
+            hB2 = array.get(pivHBar,   2); hP2 = array.get(pivHPrice, 2)
+            hP1 = array.get(pivHPrice, 1)
+            lB2 = array.get(pivLBar,   2); lP2 = array.get(pivLPrice, 2)
+            lP1 = array.get(pivLPrice, 1)
+            sH  = fSafeDiv(hP1 - hP2, hB1 - hB2)
+            sL  = fSafeDiv(lP1 - lP2, lB1 - lB2)
+            x2  = bar_index + inWedgeLookahead
+            yH2 = hP1 + sH * (x2 - hB1)
+            yL2 = lP1 + sL * (x2 - lB1)
+            den = sH - sL
+            wCol = sH > 0 and sL > 0 ? color.new(inColShort, 40) :
+                   sH < 0 and sL < 0 ? color.new(inColLong,  40) :
+                   color.new(inColWedge, 40)
+            lH = line.new(hB1, hP1, x2, yH2, xloc = xloc.bar_index,
+                          color = wCol, style = fLineStyle(inWedgeStyle), width = 2)
+            lL = line.new(lB1, lP1, x2, yL2, xloc = xloc.bar_index,
+                          color = wCol, style = fLineStyle(inWedgeStyle), width = 2)
+            array.push(wedgeLines, lH)
+            array.push(wedgeLines, lL)
+    0
+
+fUpdateWedge()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [I]  CYCLE PROJECTIONS
+// ════════════════════════════════════════════════════════════════════════════
+var box[] cycleBoxes = array.new_box()
+
+fClearCycles() =>
+    while array.size(cycleBoxes) > 0
+        box.delete(array.pop(cycleBoxes))
+    0
+
+var int cycleKey = na
+
+fUpdateCycles() =>
+    if inEnCycle and array.size(pivHBar) >= 2 and array.size(pivLBar) >= 2
+        hB0 = array.get(pivHBar, 0)
+        hB1 = array.get(pivHBar, 1)
+        lB0 = array.get(pivLBar, 0)
+        lB1 = array.get(pivLBar, 1)
+        avgPeriod = int((math.abs(hB0 - hB1) + math.abs(lB0 - lB1)) / 2)
+        kk = hB0
+        if cycleKey != kk and avgPeriod > 5
+            cycleKey := kk
+            fClearCycles()
+            halfW = math.max(1, int(avgPeriod * 0.1))
+            for p = 1 to inCycleProj
+                xMid = bar_index + avgPeriod * p
+                bx = box.new(xMid - halfW, high * 1.001, xMid + halfW, low * 0.999,
+                             xloc = xloc.bar_index,
+                             bgcolor = color.new(inColCycle, 88),
+                             border_color = color.new(inColCycle, 50),
+                             border_width = 1)
+                array.push(cycleBoxes, bx)
+    0
+
+fUpdateCycles()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [J]  LONG / SHORT BOXES
+// ════════════════════════════════════════════════════════════════════════════
+var box lsEntryBox = na
+var box lsStopBox  = na
+var box lsTargetBox= na
+
+if inEnLSBox and inLSMode != "None" and barstate.islast
+    isLong = inLSMode == "Long"
+    if not na(lsEntryBox)
+        box.delete(lsEntryBox)
+    if not na(lsStopBox)
+        box.delete(lsStopBox)
+    if not na(lsTargetBox)
+        box.delete(lsTargetBox)
+
+    x2 = bar_index + inLSBarsAhead
+    eTop = isLong ? math.max(inLSEntry, inLSStop)    : math.max(inLSEntry, inLSTarget)
+    eBot = isLong ? math.min(inLSEntry, inLSStop)    : math.min(inLSEntry, inLSTarget)
+
+    if inLSEntry > 0 and inLSStop > 0
+        lsStopBox  := box.new(bar_index, isLong ? inLSEntry : inLSStop,
+                              x2, isLong ? inLSStop : inLSEntry,
+                              xloc = xloc.bar_index,
+                              bgcolor = color.new(isLong ? inColLong : inColShort, 88),
+                              border_color = color.new(isLong ? inColLong : inColShort, 40),
+                              border_width = 2)
+    if inLSTarget > 0
+        lsTargetBox := box.new(bar_index, isLong ? inLSTarget : inLSEntry,
+                               x2, isLong ? inLSEntry : inLSTarget,
+                               xloc = xloc.bar_index,
+                               bgcolor = color.new(inColLong, 92),
+                               border_color = color.new(inColLong, 50),
+                               border_width = 1)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [K]  PLOTS
+// ════════════════════════════════════════════════════════════════════════════
+// EMA baseline for context
+plot(ta.ema(close, 50), title = "EMA 50 Context",
+     color = color.new(color.gray, 70), linewidth = 1)

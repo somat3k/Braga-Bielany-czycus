@@ -1,0 +1,430 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 02 · Momentum + Convergence / Divergence
+// ============================================================================
+// Indicator 2 of the Pinnacle ecosystem.
+//
+// CONCEPT
+// ────────
+// · Multi-oscillator momentum stack: MACD, RSI, Stoch RSI, MFI, CCI,
+//   Williams %R, Momentum (MOM), Rate of Change (ROC).
+// · Each oscillator is normalised to [-1, +1] and optionally grouped as
+//   "Convergence" (all agree) or "Divergence" (oscillators split).
+// · True price-vs-oscillator divergence is detected via recent pivot
+//   comparison and plotted as arrows above/below bars.
+// · SMC context (BOS/CHoCH) gates signal confidence.
+// · ATR-normalised volatility envelope confirms or filters readings.
+// · HTF bias blends higher-timeframe momentum into the score.
+//
+// DISPLAY
+// ────────
+// · Bottom-left corner mini-table showing all oscillator states and
+//   the combined momentum score — pinned to chart scale.
+// · Divergence arrows on the price chart.
+// · plotshape SOTA markers: bullish/bearish divergence, convergence burst,
+//   exhaustion, oscillation cluster.
+// · Ribbon plots in companion pane: normalised oscillator stack as coloured
+//   histogram columns.
+// ============================================================================
+indicator("Pinnacle · Momentum + Conv/Div", overlay = true,
+          max_lines_count  = 200,
+          max_labels_count = 200,
+          max_boxes_count  = 50)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUMS
+// ════════════════════════════════════════════════════════════════════════════
+var int MOM_BULL_CONV  =  2
+var int MOM_BULL_DIV   =  1
+var int MOM_NEUTRAL    =  0
+var int MOM_BEAR_DIV   = -1
+var int MOM_BEAR_CONV  = -2
+
+var int SMC_BOS_BULL   =  1
+var int SMC_BOS_BEAR   = -1
+var int SMC_CHOCH_BULL =  2
+var int SMC_CHOCH_BEAR = -2
+var int SMC_NONE       =  0
+
+// Minimum absolute normalised value to count an oscillator as directional
+var float MOMENTUM_THRESHOLD = 0.15
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Oscillator switches ───────────────────────────────────────────────────────
+grpOsc = "Oscillators"
+inEnMacd    = input.bool(true,  "MACD",       group = grpOsc)
+inEnRsi     = input.bool(true,  "RSI",        group = grpOsc)
+inEnStochRsi= input.bool(true,  "Stoch RSI",  group = grpOsc)
+inEnMfi     = input.bool(true,  "MFI",        group = grpOsc)
+inEnCci     = input.bool(true,  "CCI",        group = grpOsc)
+inEnWillr   = input.bool(true,  "Williams %R",group = grpOsc)
+inEnMom     = input.bool(true,  "MOM",        group = grpOsc)
+inEnRoc     = input.bool(true,  "ROC",        group = grpOsc)
+
+// ── Lengths ────────────────────────────────────────────────────────────────────
+grpLen = "Lengths"
+inAtrLen      = input.int(14,  "ATR",       group = grpLen, minval = 5,  maxval = 100)
+inMacdFast    = input.int(12,  "MACD Fast", group = grpLen, minval = 2,  maxval = 100)
+inMacdSlow    = input.int(26,  "MACD Slow", group = grpLen, minval = 3,  maxval = 200)
+inMacdSig     = input.int(9,   "MACD Sig",  group = grpLen, minval = 2,  maxval = 50)
+inRsiLen      = input.int(14,  "RSI",       group = grpLen, minval = 2,  maxval = 100)
+inStochLen    = input.int(14,  "Stoch RSI K",group = grpLen, minval = 2, maxval = 100)
+inStochSmooth = input.int(3,   "Stoch D smooth", group = grpLen, minval = 1, maxval = 20)
+inMfiLen      = input.int(14,  "MFI",       group = grpLen, minval = 2,  maxval = 100)
+inCciLen      = input.int(20,  "CCI",       group = grpLen, minval = 2,  maxval = 100)
+inWillrLen    = input.int(14,  "Williams",  group = grpLen, minval = 2,  maxval = 100)
+inMomLen      = input.int(10,  "MOM",       group = grpLen, minval = 1,  maxval = 100)
+inRocLen      = input.int(12,  "ROC",       group = grpLen, minval = 1,  maxval = 100)
+inNormClamp   = input.float(2.5,"Normalise Clamp", group = grpLen, step = 0.1, minval = 0.5, maxval = 8.0)
+
+// ── Divergence Detection ──────────────────────────────────────────────────────
+grpDiv = "Divergence Detection"
+inDivPivLeft  = input.int(3, "Pivot Left",  group = grpDiv, minval = 1, maxval = 20)
+inDivPivRight = input.int(3, "Pivot Right", group = grpDiv, minval = 1, maxval = 20)
+inDivLookback = input.int(50,"Lookback",    group = grpDiv, minval = 5, maxval = 200)
+
+// ── HTF ────────────────────────────────────────────────────────────────────────
+grpHtf = "HTF Bias"
+inHtfEnable = input.bool(true, "Blend HTF Momentum", group = grpHtf)
+inHtfTf     = input.timeframe("60", "HTF Timeframe", group = grpHtf)
+inHtfWeight = input.float(0.30, "HTF Weight", step = 0.05, minval = 0.0, maxval = 1.0, group = grpHtf)
+
+// ── SMC Gate ──────────────────────────────────────────────────────────────────
+grpSmc = "SMC / ATR Gate"
+inSmcPivLeft  = input.int(3, "SMC Pivot Left",  group = grpSmc, minval = 1, maxval = 20)
+inSmcPivRight = input.int(3, "SMC Pivot Right", group = grpSmc, minval = 1, maxval = 20)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColBull     = input.color(color.rgb(60,  230, 150),  "Bull Convergence",     group = grpCol)
+inColBear     = input.color(color.rgb(255, 100, 100),  "Bear Convergence",     group = grpCol)
+inColDivBull  = input.color(color.rgb(120, 255, 200),  "Bull Divergence",      group = grpCol)
+inColDivBear  = input.color(color.rgb(255, 170, 100),  "Bear Divergence",      group = grpCol)
+inColNeutral  = input.color(color.rgb(150, 150, 200),  "Neutral",              group = grpCol)
+inColBos      = input.color(color.rgb(80,  180, 255),  "BOS Marker",           group = grpCol)
+inColChoch    = input.color(color.rgb(255, 210, 60),   "CHoCH Marker",         group = grpCol)
+
+// ── Display ───────────────────────────────────────────────────────────────────
+grpViz = "Display"
+inShowTable    = input.bool(true,  "Show Corner Table",    group = grpViz)
+inShowDivArrow = input.bool(true,  "Show Divergence Arrows", group = grpViz)
+inShowRibbon   = input.bool(false, "Show Ribbon (Pane)",   group = grpViz)
+inShowSota     = input.bool(true,  "Show SOTA Markers",    group = grpViz)
+inDrawBudget   = input.int(120,    "Draw Budget",          group = grpViz, minval = 20, maxval = 300)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+fClamp(v, lo, hi) => math.max(lo, math.min(hi, v))
+fSafeDiv(a, b)    => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
+
+fNorm(v, center, spread) =>
+    z = fSafeDiv(v - center, math.max(spread, 1e-10))
+    fClamp(z / inNormClamp, -1.0, 1.0)
+
+// Map normalised [-1,1] to "strength" colour
+fMomColor(n) =>
+    n >= 0.5  ? inColBull :
+     n >= 0.1  ? color.new(inColBull, 50) :
+     n <= -0.5 ? inColBear :
+     n <= -0.1 ? color.new(inColBear, 50) :
+     inColNeutral
+
+fStateSymbol(n) =>
+    n >= 0.5  ? "▲▲" :
+     n >= 0.1  ? "▲" :
+     n <= -0.5 ? "▼▼" :
+     n <= -0.1 ? "▼" :
+     "●"
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  OSCILLATOR COMPUTATIONS
+// ════════════════════════════════════════════════════════════════════════════
+atr = ta.atr(inAtrLen)
+std = ta.stdev(close, 20)
+
+// MACD
+macdLine     = ta.ema(close, inMacdFast) - ta.ema(close, inMacdSlow)
+macdSigLine  = ta.ema(macdLine, inMacdSig)
+macdHist     = macdLine - macdSigLine
+nMacd        = inEnMacd ? fNorm(macdHist, 0.0, atr) : 0.0
+
+// RSI — map to [-1,+1] centred at 50
+rsiRaw  = ta.rsi(close, inRsiLen)
+nRsi    = inEnRsi ? fNorm(rsiRaw, 50.0, 20.0) : 0.0
+
+// Stochastic (K/D applied to RSI for true Stoch-RSI behaviour)
+rsiForStoch      = ta.rsi(close, inRsiLen)
+[stochK, stochD] = ta.stoch(rsiForStoch, rsiForStoch, rsiForStoch, inStochLen)
+stochSmoothed    = ta.sma(stochK, inStochSmooth)
+nStoch = inEnStochRsi ? fNorm(stochSmoothed, 50.0, 20.0) : 0.0
+
+// MFI
+mfiRaw = ta.mfi(hlc3, inMfiLen)
+nMfi   = inEnMfi ? fNorm(mfiRaw, 50.0, 20.0) : 0.0
+
+// CCI
+cciRaw = ta.cci(close, inCciLen)
+nCci   = inEnCci ? fNorm(cciRaw, 0.0, 100.0) : 0.0
+
+// Williams %R
+willrRaw = ta.wpr(inWillrLen)
+nWillr   = inEnWillr ? fNorm(willrRaw, -50.0, 30.0) : 0.0
+
+// Momentum
+momRaw = ta.mom(close, inMomLen)
+nMom   = inEnMom ? fNorm(momRaw, 0.0, atr) : 0.0
+
+// ROC
+rocRaw = ta.roc(close, inRocLen)
+nRoc   = inEnRoc ? fNorm(rocRaw, 0.0, std) : 0.0
+
+// ── Active count & weighted composite ─────────────────────────────────────────
+activeCount = (inEnMacd ? 1 : 0) + (inEnRsi ? 1 : 0) + (inEnStochRsi ? 1 : 0) +
+              (inEnMfi  ? 1 : 0) + (inEnCci  ? 1 : 0) + (inEnWillr    ? 1 : 0) +
+              (inEnMom  ? 1 : 0) + (inEnRoc  ? 1 : 0)
+
+rawComposite = nMacd + nRsi + nStoch + nMfi + nCci + nWillr + nMom + nRoc
+composite    = fSafeDiv(rawComposite, math.max(activeCount, 1))
+
+// ── HTF blend ─────────────────────────────────────────────────────────────────
+htfRsiRaw = request.security(syminfo.tickerid, inHtfTf, ta.rsi(close, inRsiLen),
+                              barmerge.gaps_off, barmerge.lookahead_off)
+htfMom    = fNorm(htfRsiRaw, 50.0, 20.0)
+finalScore = inHtfEnable ?
+     (1.0 - inHtfWeight) * composite + inHtfWeight * htfMom :
+     composite
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  CONVERGENCE / DIVERGENCE STATE
+// ════════════════════════════════════════════════════════════════════════════
+// Count oscillators pointing in each direction (threshold ±0.15)
+bullCount = (nMacd > MOMENTUM_THRESHOLD ? 1 : 0) + (nRsi > MOMENTUM_THRESHOLD ? 1 : 0) + (nStoch > MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMfi  > MOMENTUM_THRESHOLD ? 1 : 0) + (nCci > MOMENTUM_THRESHOLD ? 1 : 0) + (nWillr > MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMom  > MOMENTUM_THRESHOLD ? 1 : 0) + (nRoc > MOMENTUM_THRESHOLD ? 1 : 0)
+bearCount = (nMacd < -MOMENTUM_THRESHOLD ? 1 : 0) + (nRsi < -MOMENTUM_THRESHOLD ? 1 : 0) + (nStoch < -MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMfi  < -MOMENTUM_THRESHOLD ? 1 : 0) + (nCci < -MOMENTUM_THRESHOLD ? 1 : 0) + (nWillr < -MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMom  < -MOMENTUM_THRESHOLD ? 1 : 0) + (nRoc < -MOMENTUM_THRESHOLD ? 1 : 0)
+
+convThreshold = math.max(activeCount - 2, 1)
+isBullConv = bullCount >= convThreshold
+isBearConv = bearCount >= convThreshold
+isDivergent = bullCount >= 2 and bearCount >= 2
+
+momState = isBullConv ? MOM_BULL_CONV : isBearConv ? MOM_BEAR_CONV :
+           isDivergent ? (finalScore > 0 ? MOM_BULL_DIV : MOM_BEAR_DIV) : MOM_NEUTRAL
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  PRICE-VS-OSCILLATOR TRUE DIVERGENCE DETECTION
+// ════════════════════════════════════════════════════════════════════════════
+pivHigh = ta.pivothigh(high,        inDivPivLeft, inDivPivRight)
+pivLow  = ta.pivotlow(low,          inDivPivLeft, inDivPivRight)
+pivOscH = ta.pivothigh(composite,   inDivPivLeft, inDivPivRight)
+pivOscL = ta.pivotlow(composite,    inDivPivLeft, inDivPivRight)
+
+var float lastPriceHigh   = na
+var float lastPriceHighOsc= na
+var float lastPriceLow    = na
+var float lastPriceLowOsc = na
+var int   lastHighBar     = na
+var int   lastLowBar      = na
+
+if not na(pivHigh)
+    lastPriceHigh    := pivHigh
+    lastPriceHighOsc := composite[inDivPivRight]
+    lastHighBar      := bar_index - inDivPivRight
+
+if not na(pivLow)
+    lastPriceLow    := pivLow
+    lastPriceLowOsc := composite[inDivPivRight]
+    lastLowBar      := bar_index - inDivPivRight
+
+// Regular bearish divergence: price HH, oscillator LH
+regBearDiv = not na(lastPriceHigh) and not na(pivHigh) and
+             pivHigh > lastPriceHigh[1] and
+             composite[inDivPivRight] < lastPriceHighOsc[1] and
+             (bar_index - lastHighBar[1]) <= inDivLookback
+
+// Regular bullish divergence: price LL, oscillator HL
+regBullDiv = not na(lastPriceLow) and not na(pivLow) and
+             pivLow < lastPriceLow[1] and
+             composite[inDivPivRight] > lastPriceLowOsc[1] and
+             (bar_index - lastLowBar[1]) <= inDivLookback
+
+// Hidden bullish: price HL, oscillator LL
+hidBullDiv = not na(lastPriceLow) and not na(pivLow) and
+             pivLow > lastPriceLow[1] and
+             composite[inDivPivRight] < lastPriceLowOsc[1] and
+             (bar_index - lastLowBar[1]) <= inDivLookback
+
+// Hidden bearish: price LH, oscillator HH
+hidBearDiv = not na(lastPriceHigh) and not na(pivHigh) and
+             pivHigh < lastPriceHigh[1] and
+             composite[inDivPivRight] > lastPriceHighOsc[1] and
+             (bar_index - lastHighBar[1]) <= inDivLookback
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  SMC CONTEXT (BOS / CHoCH)
+// ════════════════════════════════════════════════════════════════════════════
+smcPH     = ta.pivothigh(high, inSmcPivLeft, inSmcPivRight)
+smcPL     = ta.pivotlow(low,  inSmcPivLeft, inSmcPivRight)
+
+var float smcLastPH = na
+var float smcLastPL = na
+var float smcPrevPH = na
+var float smcPrevPL = na
+
+if not na(smcPH)
+    smcPrevPH := smcLastPH
+    smcLastPH := smcPH
+if not na(smcPL)
+    smcPrevPL := smcLastPL
+    smcLastPL := smcPL
+
+isBOS    = not na(smcLastPH) and not na(smcPrevPH) and smcLastPH > smcPrevPH
+isCHOCH  = not na(smcLastPL) and not na(smcPrevPL) and smcLastPL > smcPrevPL
+isBOSB   = not na(smcLastPL) and not na(smcPrevPL) and smcLastPL < smcPrevPL
+isCHOCHB = not na(smcLastPH) and not na(smcPrevPH) and smcLastPH < smcPrevPH
+
+smcContext = isCHOCH ? SMC_CHOCH_BULL : isBOS ? SMC_BOS_BULL :
+             isCHOCHB ? SMC_CHOCH_BEAR : isBOSB ? SMC_BOS_BEAR : SMC_NONE
+
+// Confidence gate: SMC alignment with momentum score
+smcAligned = (smcContext > 0 and finalScore > 0.2) or
+             (smcContext < 0 and finalScore < -0.2) or
+             smcContext == 0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [H]  BOTTOM-LEFT CORNER TABLE
+// ════════════════════════════════════════════════════════════════════════════
+// Occupies left-bottom corner; width scales with chart rightward to end.
+// 3 columns: Name | State symbol | Normalised value
+
+var table momTable = table.new(position.bottom_left, 3, 11, border_width = 1,
+                               frame_color = color.new(color.gray, 70),
+                               bgcolor     = color.new(color.black, 80))
+
+if barstate.islast and inShowTable
+    // Header
+    table.cell(momTable, 0, 0,  "Oscillator", text_color = color.gray,  bgcolor = color.new(color.black, 60), text_size = size.tiny)
+    table.cell(momTable, 1, 0,  "Dir",        text_color = color.gray,  bgcolor = color.new(color.black, 60), text_size = size.tiny)
+    table.cell(momTable, 2, 0,  "Score",      text_color = color.gray,  bgcolor = color.new(color.black, 60), text_size = size.tiny)
+
+    // Rows
+    oscNames  = array.from("MACD", "RSI", "Stoch", "MFI", "CCI", "WILLR", "MOM", "ROC")
+    oscVals   = array.from(nMacd,  nRsi,  nStoch,  nMfi,  nCci,  nWillr,  nMom,  nRoc)
+    oscEnable = array.from(inEnMacd, inEnRsi, inEnStochRsi, inEnMfi, inEnCci, inEnWillr, inEnMom, inEnRoc)
+
+    for r = 0 to 7
+        nm  = array.get(oscNames, r)
+        v   = array.get(oscVals,  r)
+        en  = array.get(oscEnable, r)
+        c   = en ? fMomColor(v) : color.new(color.gray, 80)
+        sym = en ? fStateSymbol(v) : "—"
+        txt = en ? str.tostring(v, "#.##") : "—"
+        table.cell(momTable, 0, r + 1, nm,  text_color = color.gray,         bgcolor = color.new(color.black, 85), text_size = size.tiny)
+        table.cell(momTable, 1, r + 1, sym, text_color = c,                   bgcolor = color.new(color.black, 85), text_size = size.tiny)
+        table.cell(momTable, 2, r + 1, txt, text_color = color.new(c, 20),   bgcolor = color.new(color.black, 85), text_size = size.tiny)
+
+    // Composite + SMC row
+    compSym = fStateSymbol(finalScore)
+    compC   = fMomColor(finalScore)
+    smcTxt  = smcContext == SMC_CHOCH_BULL ? "CHoCH↑" : smcContext == SMC_BOS_BULL ? "BOS↑" :
+               smcContext == SMC_CHOCH_BEAR ? "CHoCH↓" : smcContext == SMC_BOS_BEAR ? "BOS↓" : "—"
+    table.cell(momTable, 0, 9,  "Composite", text_color = compC,                bgcolor = color.new(color.black, 70), text_size = size.tiny)
+    table.cell(momTable, 1, 9,  compSym,     text_color = compC,                bgcolor = color.new(color.black, 70), text_size = size.tiny)
+    table.cell(momTable, 2, 9,  str.tostring(finalScore, "#.##"), text_color = color.new(compC, 10), bgcolor = color.new(color.black, 70), text_size = size.tiny)
+    table.cell(momTable, 0, 10, "SMC",       text_color = color.gray,           bgcolor = color.new(color.black, 75), text_size = size.tiny)
+    table.cell(momTable, 1, 10, smcTxt,      text_color = smcContext > 0 ? inColBos : smcContext < 0 ? inColBear : color.gray, bgcolor = color.new(color.black, 75), text_size = size.tiny)
+    table.cell(momTable, 2, 10, smcAligned ? "✓" : "✗", text_color = smcAligned ? color.lime : color.red, bgcolor = color.new(color.black, 75), text_size = size.tiny)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [I]  DIVERGENCE ARROW DRAWINGS
+// ════════════════════════════════════════════════════════════════════════════
+var label[] divLabels = array.new_label()
+
+if inShowDivArrow
+    if regBullDiv
+        lb = label.new(bar_index - inDivPivRight, low[inDivPivRight] - atr * 0.5,
+                       "RegBull DIV",
+                       xloc      = xloc.bar_index,
+                       style     = label.style_label_up,
+                       textcolor = inColDivBull,
+                       color     = color.new(color.black, 80),
+                       size      = size.tiny)
+        array.unshift(divLabels, lb)
+
+    if regBearDiv
+        lb = label.new(bar_index - inDivPivRight, high[inDivPivRight] + atr * 0.5,
+                       "RegBear DIV",
+                       xloc      = xloc.bar_index,
+                       style     = label.style_label_down,
+                       textcolor = inColDivBear,
+                       color     = color.new(color.black, 80),
+                       size      = size.tiny)
+        array.unshift(divLabels, lb)
+
+    if hidBullDiv
+        lb = label.new(bar_index - inDivPivRight, low[inDivPivRight] - atr * 0.3,
+                       "HidBull",
+                       xloc      = xloc.bar_index,
+                       style     = label.style_label_up,
+                       textcolor = color.new(inColDivBull, 40),
+                       color     = color.new(color.black, 85),
+                       size      = size.tiny)
+        array.unshift(divLabels, lb)
+
+    if hidBearDiv
+        lb = label.new(bar_index - inDivPivRight, high[inDivPivRight] + atr * 0.3,
+                       "HidBear",
+                       xloc      = xloc.bar_index,
+                       style     = label.style_label_down,
+                       textcolor = color.new(inColDivBear, 40),
+                       color     = color.new(color.black, 85),
+                       size      = size.tiny)
+        array.unshift(divLabels, lb)
+
+    while array.size(divLabels) > inDrawBudget
+        label.delete(array.pop(divLabels))
+
+// ════════════════════════════════════════════════════════════════════════════
+// [J]  SOTA MARKERS
+// ════════════════════════════════════════════════════════════════════════════
+// BOS / CHoCH structure markers
+plotshape(inShowSota and isBOS,    title = "BOS Bull",    style = shape.xcross, location = location.abovebar, color = color.new(inColBos,  25), size = size.tiny)
+plotshape(inShowSota and isBOSB,   title = "BOS Bear",    style = shape.xcross, location = location.belowbar, color = color.new(inColBear, 25), size = size.tiny)
+plotshape(inShowSota and isCHOCH,  title = "CHoCH Bull",  style = shape.cross,  location = location.abovebar, color = color.new(inColChoch, 15), size = size.small)
+plotshape(inShowSota and isCHOCHB, title = "CHoCH Bear",  style = shape.cross,  location = location.belowbar, color = color.new(inColChoch, 15), size = size.small)
+
+// Convergence burst markers
+plotshape(inShowSota and isBullConv and not isBullConv[1], title = "Bull Convergence",
+          style = shape.triangleup, location = location.belowbar,
+          color = color.new(inColBull, 10), size = size.small)
+plotshape(inShowSota and isBearConv and not isBearConv[1], title = "Bear Convergence",
+          style = shape.triangledown, location = location.abovebar,
+          color = color.new(inColBear, 10), size = size.small)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [K]  COMPANION PANE PLOTS
+// ════════════════════════════════════════════════════════════════════════════
+// Zero line
+hline(0, "Zero", color = color.new(color.gray, 60), linestyle = hline.style_dashed)
+
+// Final composite
+plot(inShowRibbon ? na : finalScore, title = "Momentum Composite",
+     color     = fMomColor(finalScore),
+     style     = plot.style_histogram,
+     linewidth = 2)
+
+// Individual oscillator lines (shown only when ribbon is on)
+plot(inShowRibbon and inEnMacd    ? nMacd  : na, title = "MACD norm",   color = color.new(color.aqua,   40), linewidth = 1)
+plot(inShowRibbon and inEnRsi     ? nRsi   : na, title = "RSI norm",    color = color.new(color.lime,   40), linewidth = 1)
+plot(inShowRibbon and inEnStochRsi? nStoch : na, title = "Stoch norm",  color = color.new(color.yellow, 40), linewidth = 1)
+plot(inShowRibbon and inEnMfi     ? nMfi   : na, title = "MFI norm",    color = color.new(color.orange, 40), linewidth = 1)
+plot(inShowRibbon and inEnCci     ? nCci   : na, title = "CCI norm",    color = color.new(color.purple, 40), linewidth = 1)
+plot(inShowRibbon and inEnWillr   ? nWillr : na, title = "WillR norm",  color = color.new(color.fuchsia,40), linewidth = 1)
+plot(inShowRibbon and inEnMom     ? nMom   : na, title = "MOM norm",    color = color.new(color.teal,   40), linewidth = 1)
+plot(inShowRibbon and inEnRoc     ? nRoc   : na, title = "ROC norm",    color = color.new(color.silver, 40), linewidth = 1)

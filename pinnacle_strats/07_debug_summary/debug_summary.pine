@@ -1,0 +1,369 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 07 · Summarizer + Debugger
+// ============================================================================
+// Indicator 7 of the Pinnacle ecosystem — the "control room".
+//
+// PURPOSE
+// ────────
+// When all Pinnacle indicators (01–06) are loaded on the same chart, this
+// script collects as many chart-level signals as possible from market data
+// and surfaces them in a single unified dashboard.  It also provides an
+// on-bar debug overlay showing the most relevant computed values.
+//
+// MODULES
+// ────────
+// · Master Summary Table — top-right corner table showing the current
+//   state of: Trend, Momentum, Structure, Wave, Volume, Regime, Signal,
+//   Confidence, Conflict, and a composite "Pinnacle Score" [-1…+1].
+//
+// · Oscillator Snapshot — RSI, MACD histogram, ATR ratio, Volume ratio,
+//   and VWAP distance in a compact strip.
+//
+// · Debug Label Overlay — prints key values on the current bar as a
+//   multi-line label when Debug Mode is on.
+//
+// · Health Monitor — checks for abnormal conditions:
+//     - ATR suspiciously near 0 (data quality issue)
+//     - Volume = 0 (extended market / synthetic feed)
+//     - Flat price (no movement)
+//   Warns via a label if any health check fails.
+//
+// · Performance Tracker — tracks last N strategy-like signals generated
+//   by this script's own composite score, evaluates outcome after
+//   inRewardBars, and displays win-rate + expectancy in the table.
+// ============================================================================
+indicator("Pinnacle · Summarizer + Debugger", overlay = true,
+          max_lines_count  = 100,
+          max_labels_count = 100,
+          max_boxes_count  = 20)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUMS
+// ════════════════════════════════════════════════════════════════════════════
+var int SIG_LONG    =  1
+var int SIG_SHORT   = -1
+var int SIG_STANDBY =  0
+
+var int RISK_PRIME    = 1
+var int RISK_STANDARD = 2
+var int RISK_CAUTION  = 3
+
+var int REGIME_TRENDING     = 1
+var int REGIME_RANGING      = 2
+var int REGIME_VOLATILE     = 3
+var int REGIME_TRANSITIONAL = 4
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── General ───────────────────────────────────────────────────────────────────
+grpGen = "General"
+inWarmup    = input.int(300,  "Warmup Bars",   group = grpGen, minval = 50,  maxval = 3000)
+inAtrLen    = input.int(14,   "ATR Length",    group = grpGen, minval = 5,   maxval = 100)
+inDebug     = input.bool(false,"Debug Labels", group = grpGen)
+
+// ── Summary Table ─────────────────────────────────────────────────────────────
+grpTbl = "Summary Table"
+inShowTable    = input.bool(true, "Show Summary Table", group = grpTbl)
+inShowOscStrip = input.bool(true, "Show Oscillator Strip", group = grpTbl)
+
+// ── Signal Weights ────────────────────────────────────────────────────────────
+grpW = "Signal Weights"
+inWTrend  = input.float(1.0, "Trend",     group = grpW, step = 0.05, minval = 0, maxval = 3)
+inWMom    = input.float(1.0, "Momentum",  group = grpW, step = 0.05, minval = 0, maxval = 3)
+inWStruct = input.float(1.2, "Structure", group = grpW, step = 0.05, minval = 0, maxval = 3)
+inWVol    = input.float(0.8, "Volume",    group = grpW, step = 0.05, minval = 0, maxval = 3)
+
+// ── Thresholds ────────────────────────────────────────────────────────────────
+grpThr = "Thresholds"
+inLongThr  = input.float( 0.55, "Long  Threshold",  group = grpThr, step = 0.01)
+inShortThr = input.float(-0.55, "Short Threshold",  group = grpThr, step = 0.01)
+inConflict = input.float( 0.70, "Conflict Gate",    group = grpThr, step = 0.01)
+
+// ── Performance ───────────────────────────────────────────────────────────────
+grpPerf = "Performance"
+inRewardBars = input.int(5,   "Outcome Horizon (bars)", group = grpPerf, minval = 2, maxval = 50)
+inPerfLookback=input.int(100, "Track Last N Signals",   group = grpPerf, minval = 10, maxval = 500)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColBull    = input.color(color.rgb(60,  230, 150), "Bull",    group = grpCol)
+inColBear    = input.color(color.rgb(255, 100, 100), "Bear",    group = grpCol)
+inColNeutral = input.color(color.rgb(160, 160, 220), "Neutral", group = grpCol)
+inColWarn    = input.color(color.rgb(255, 200,  60), "Warning", group = grpCol)
+inColErr     = input.color(color.rgb(255,  60,  60), "Error",   group = grpCol)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+fClamp(v, lo, hi) => math.max(lo, math.min(hi, v))
+fSafeDiv(a, b)    => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
+fNorm(v, center, spread) =>
+    fClamp(fSafeDiv(v - center, math.max(spread, 1e-10)) / 2.5, -1.0, 1.0)
+
+fSignalStr(s) => s == SIG_LONG ? "LONG ▲" : s == SIG_SHORT ? "SHORT ▼" : "STANDBY ●"
+fRiskStr(r)   => r == RISK_PRIME ? "PRIME" : r == RISK_STANDARD ? "STD" : "CAUTION"
+fRegimeStr(r) => r == REGIME_TRENDING ? "TREND" : r == REGIME_RANGING ? "RANGE" :
+                 r == REGIME_VOLATILE ? "VOLT"  : "TRANS"
+
+fScoreColor(s) =>
+    s >= 0.5  ? inColBull :
+     s >= 0.1  ? color.new(inColBull,  40) :
+     s <= -0.5 ? inColBear :
+     s <= -0.1 ? color.new(inColBear,  40) :
+     inColNeutral
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  MARKET FEATURE COMPUTATION
+// ════════════════════════════════════════════════════════════════════════════
+isReady = bar_index > inWarmup
+
+atr       = ta.atr(inAtrLen)
+atrAvg    = ta.sma(atr, 50)
+volAvg    = ta.sma(volume, 20)
+rsiVal    = ta.rsi(close, 14)
+vwapVal   = ta.vwap(hlc3)
+ema20     = ta.ema(close, 20)
+ema50     = ta.ema(close, 50)
+ema200    = ta.ema(close, 200)
+macdLine  = ta.ema(close, 12) - ta.ema(close, 26)
+macdSig   = ta.ema(macdLine, 9)
+macdHist  = macdLine - macdSig
+
+// ── Normalised scores ─────────────────────────────────────────────────────────
+nTrend  = fNorm((ema20 - ema50) + (ema50 - ema200), 0.0, atr)
+nMom    = fNorm(rsiVal, 50.0, 20.0) * 0.5 + fNorm(macdHist, 0.0, atr) * 0.5
+nVol    = fNorm(volume, volAvg, ta.stdev(volume, 20))
+nVwap   = fNorm(close - vwapVal, 0.0, atr)
+
+// ── Regime ────────────────────────────────────────────────────────────────────
+atrRatio   = fSafeDiv(atr, atrAvg)
+adxProxy   = math.abs(nTrend)     // simplified ADX proxy
+regime = atrRatio > 1.35 ? REGIME_VOLATILE :
+         adxProxy > 0.42  ? REGIME_TRENDING :
+         adxProxy < 0.20  ? REGIME_RANGING  :
+         REGIME_TRANSITIONAL
+
+// ── Structure: simple BOS proxy ───────────────────────────────────────────────
+ph = ta.pivothigh(high, 3, 3)
+pl = ta.pivotlow(low,  3, 3)
+var float lastPH = na
+var float lastPL = na
+var float prevPH = na
+var float prevPL = na
+if not na(ph)
+    prevPH := lastPH
+    lastPH := ph
+if not na(pl)
+    prevPL := lastPL
+    lastPL := pl
+nStruct = not na(lastPH) and not na(prevPH) ?
+           fNorm(lastPH - prevPH, 0.0, atr) : 0.0
+
+// ── Weighted composite ────────────────────────────────────────════════════────
+wTotal = inWTrend + inWMom + inWStruct + inWVol
+rawScore = (nTrend * inWTrend + nMom * inWMom + nStruct * inWStruct + nVol * inWVol)
+composite = fClamp(fSafeDiv(rawScore, math.max(wTotal, 1e-6)), -1.0, 1.0)
+
+// ── Conflict measure (spread of component scores) ──────────────────────────────
+minS     = math.min(nTrend, math.min(nMom, math.min(nStruct, nVol)))
+maxS     = math.max(nTrend, math.max(nMom, math.max(nStruct, nVol)))
+conflict = fClamp(fSafeDiv(maxS - minS, 2.0), 0.0, 1.0)
+
+// ── Signal ────────────────────────────────────────────────────────────────────
+signal = not isReady or conflict >= inConflict ? SIG_STANDBY :
+         composite >= inLongThr  ? SIG_LONG  :
+         composite <= inShortThr ? SIG_SHORT :
+         SIG_STANDBY
+
+confidence = fClamp(math.abs(composite) * (1.0 - conflict * 0.5), 0.0, 1.0)
+
+risk = confidence > 0.70 ? RISK_PRIME :
+       confidence > 0.45 ? RISK_STANDARD :
+       RISK_CAUTION
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  HEALTH MONITOR
+// ════════════════════════════════════════════════════════════════════════════
+healthOk    = true
+healthMsg   = ""
+
+if atr < syminfo.mintick * 2
+    healthOk  := false
+    healthMsg := "⚠ ATR ≈ 0 — data quality issue"
+else if volume == 0
+    healthOk  := false
+    healthMsg := "⚠ Volume = 0 — extended session or synthetic feed"
+else if high == low
+    healthOk  := false
+    healthMsg := "⚠ Flat candle — no price movement"
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  PERFORMANCE TRACKER
+// ════════════════════════════════════════════════════════════════════════════
+var int[]   perfBar    = array.new_int()
+var int[]   perfSig    = array.new_int()
+var float[] perfEntry  = array.new_float()
+var int[]   perfResult = array.new_int()   // +1 win, -1 loss, 0 pending
+
+if isReady and signal != SIG_STANDBY
+    array.unshift(perfBar,    bar_index)
+    array.unshift(perfSig,    signal)
+    array.unshift(perfEntry,  close)
+    array.unshift(perfResult, 0)
+    if array.size(perfBar) > inPerfLookback
+        array.pop(perfBar); array.pop(perfSig)
+        array.pop(perfEntry); array.pop(perfResult)
+
+// Evaluate pending outcomes
+n = array.size(perfBar)
+if n > 0
+    i = 0
+    while i < n
+        if array.get(perfResult, i) == 0
+            age = bar_index - array.get(perfBar, i)
+            if age >= inRewardBars
+                entry = array.get(perfEntry, i)
+                sig   = array.get(perfSig,   i)
+                ret   = sig == SIG_LONG ? (close - entry) : (entry - close)
+                array.set(perfResult, i, ret > 0 ? 1 : -1)
+        i += 1
+
+wins   = 0
+losses = 0
+nn = array.size(perfResult)
+for k = 0 to nn - 1
+    r = array.get(perfResult, k)
+    if r ==  1
+        wins   += 1
+    if r == -1
+        losses += 1
+
+total  = wins + losses
+winRate = total > 0 ? fSafeDiv(wins, total) : na
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  SUMMARY TABLE
+// ════════════════════════════════════════════════════════════════════════════
+var table sumTable = table.new(position.top_right, 2, 14, border_width = 1,
+                               frame_color = color.new(color.gray, 60),
+                               bgcolor     = color.new(color.black, 75))
+
+if barstate.islast and inShowTable
+    hdrBg = color.new(color.black, 55)
+
+    // Header
+    table.cell(sumTable, 0, 0, "Metric",          text_color = color.gray,   bgcolor = color.new(color.black, 50), text_size = size.tiny)
+    table.cell(sumTable, 1, 0, "Value",            text_color = color.gray,   bgcolor = color.new(color.black, 50), text_size = size.tiny)
+
+    rows = array.from("Score","Signal","Confidence","Conflict","Regime","Trend","Momentum","Structure","Volume","VWAP Δ","ATR/Avg","Risk","WinRate","Health")
+    vals = array.from(
+        str.tostring(composite, "#.###"),
+        fSignalStr(signal),
+        str.tostring(confidence * 100.0, "#.0") + "%",
+        str.tostring(conflict * 100.0, "#.0") + "%",
+        fRegimeStr(regime),
+        str.tostring(nTrend,  "#.##"),
+        str.tostring(nMom,    "#.##"),
+        str.tostring(nStruct, "#.##"),
+        str.tostring(nVol,    "#.##"),
+        str.tostring(fSafeDiv(close - vwapVal, atr), "#.##") + "× ATR",
+        str.tostring(atrRatio, "#.##"),
+        fRiskStr(risk),
+        na(winRate) ? "N/A" : str.tostring(winRate * 100.0, "#.0") + "% (" + str.tostring(wins) + "/" + str.tostring(total) + ")",
+        healthOk ? "✓ OK" : healthMsg
+    )
+    valCols = array.from(
+        fScoreColor(composite),
+        signal == SIG_LONG ? inColBull : signal == SIG_SHORT ? inColBear : inColNeutral,
+        color.new(color.white, 30),
+        conflict > 0.70 ? inColBear : conflict > 0.40 ? inColWarn : inColNeutral,
+        color.gray,
+        fScoreColor(nTrend),
+        fScoreColor(nMom),
+        fScoreColor(nStruct),
+        fScoreColor(nVol),
+        fScoreColor(fSafeDiv(close - vwapVal, atr) / 3.0),
+        atrRatio > 1.5 ? inColBear : atrRatio > 1.0 ? inColNeutral : inColBull,
+        risk == RISK_PRIME ? inColBull : risk == RISK_CAUTION ? inColBear : inColNeutral,
+        na(winRate) ? color.gray : winRate > 0.55 ? inColBull : winRate < 0.45 ? inColBear : inColNeutral,
+        healthOk ? inColBull : inColErr
+    )
+
+    for r = 0 to 13
+        table.cell(sumTable, 0, r + 1, array.get(rows, r), text_color = color.gray,                bgcolor = color.new(color.black, 80), text_size = size.tiny)
+        table.cell(sumTable, 1, r + 1, array.get(vals, r), text_color = array.get(valCols, r),     bgcolor = color.new(color.black, 80), text_size = size.tiny)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [H]  OSCILLATOR STRIP  (bottom-left, compact bar)
+// ════════════════════════════════════════════════════════════════════════════
+var table oscStrip = table.new(position.bottom_left, 5, 2, border_width = 1,
+                                bgcolor = color.new(color.black, 80))
+
+if barstate.islast and inShowOscStrip
+    oscNames = array.from("RSI", "MACD", "ATR×", "Vol×", "VWAP")
+    oscVals  = array.from(
+        str.tostring(rsiVal, "#.0"),
+        str.tostring(macdHist, format.mintick),
+        str.tostring(atrRatio, "#.##"),
+        str.tostring(fSafeDiv(volume, volAvg), "#.##"),
+        str.tostring(fSafeDiv(close - vwapVal, atr), "#.##")
+    )
+    oscCols = array.from(
+        rsiVal > 70 ? inColBear : rsiVal < 30 ? inColBull : inColNeutral,
+        macdHist > 0 ? inColBull : inColBear,
+        atrRatio > 1.35 ? inColBear : inColNeutral,
+        fSafeDiv(volume, volAvg) > 2.0 ? inColBull : inColNeutral,
+        fSafeDiv(close - vwapVal, atr) > 0 ? inColBull : inColBear
+    )
+    for c = 0 to 4
+        table.cell(oscStrip, c, 0, array.get(oscNames, c), text_color = color.gray,               bgcolor = color.new(color.black, 60), text_size = size.tiny)
+        table.cell(oscStrip, c, 1, array.get(oscVals, c),  text_color = array.get(oscCols, c),    bgcolor = color.new(color.black, 80), text_size = size.tiny)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [I]  DEBUG LABEL
+// ════════════════════════════════════════════════════════════════════════════
+var label[] dbgLabels = array.new_label()
+
+if isReady and inDebug
+    dbgTxt = "Score="  + str.tostring(composite, "#.###") +
+             "\nConf=" + str.tostring(confidence, "#.##") +
+             "\nConfl="+ str.tostring(conflict,   "#.##") +
+             "\nATR/Avg=" + str.tostring(atrRatio, "#.##") +
+             "\nRegime=" + fRegimeStr(regime) +
+             "\nSig="  + fSignalStr(signal)
+
+    lb = label.new(bar_index, high + atr * 0.5, dbgTxt,
+                   xloc = xloc.bar_index,
+                   style = label.style_label_down,
+                   textcolor = color.white,
+                   color = color.new(color.navy, 60),
+                   size = size.tiny)
+    array.unshift(dbgLabels, lb)
+    while array.size(dbgLabels) > 50
+        label.delete(array.pop(dbgLabels))
+
+// ════════════════════════════════════════════════════════════════════════════
+// [J]  PLOTS
+// ════════════════════════════════════════════════════════════════════════════
+hline(0, "Zero", color = color.new(color.gray, 60), linestyle = hline.style_dashed)
+plot(isReady ? composite : na, title = "Pinnacle Score",
+     color  = fScoreColor(composite),
+     style  = plot.style_histogram,
+     linewidth = 2)
+plot(isReady ? confidence : na, title = "Confidence",
+     color = color.new(color.white, 50), linewidth = 1)
+plot(isReady ? conflict : na, title = "Conflict",
+     color = color.new(color.orange, 50), linewidth = 1)
+
+// Signal triangles on price chart
+plotshape(isReady and signal == SIG_LONG,
+          title = "Long Signal", style = shape.triangleup,
+          location = location.belowbar,
+          color = color.new(inColBull, 15), size = size.small)
+plotshape(isReady and signal == SIG_SHORT,
+          title = "Short Signal", style = shape.triangledown,
+          location = location.abovebar,
+          color = color.new(inColBear, 15), size = size.small)

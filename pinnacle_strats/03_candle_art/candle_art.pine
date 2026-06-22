@@ -1,0 +1,205 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 03 · Candle Art — HA + Candle Coloring + Area Indication
+// ============================================================================
+// Indicator 3 of the Pinnacle ecosystem.
+//
+// CONCEPT
+// ────────
+// · Heikin Ashi mode: re-computes HA values on the current timeframe,
+//   colours each candle's body, upper shadow, and lower wick independently
+//   by their ratio to total candle range (body%, wick%, shadow%).
+//   Example palette: 0–30 % body → indecision pastel, 70–100 % body →
+//   strong impulse saturated colour.
+//
+// · Classic Candle mode: same ratio-based colouring applied to standard
+//   OHLC bars, with optional wick/shadow gradient blend.
+//
+// · Area Chart overlay: plots a filled area between close and a dynamic
+//   baseline (EMA / VWAP) to visualise net directional flow.
+//   Bullish area (close above baseline) = gradient fill in bull colour.
+//   Bearish area = gradient fill in bear colour.
+//   Breakout expansion of area > prior max → area_breakout signal.
+//
+// PLACEHOLDER IMPLEMENTATIONS
+// ────────────────────────────
+// Full candle recolouring requires Pine Script `barcolor()` / `plotcandle()`
+// which cannot override the default chart candles in overlay mode.
+// This scaffold uses `barcolor()` (applies to main candle series when loaded
+// as an overlay) and `plotcandle()` for a secondary HA candle series.
+// ============================================================================
+indicator("Pinnacle · Candle Art", overlay = true,
+          max_lines_count  = 100,
+          max_labels_count = 100,
+          max_boxes_count  = 20)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUMS  (from _enum_lib.pine)
+// ════════════════════════════════════════════════════════════════════════════
+var int HA_FULL_BULL  =  1
+var int HA_FULL_BEAR  = -1
+var int HA_INDECISION =  0
+var int HA_PULL_UP    =  2
+var int HA_PULL_DOWN  = -2
+
+var int AREA_FLOW_BULL  =  1
+var int AREA_FLOW_BEAR  = -1
+var int AREA_BREAKOUT   =  2
+var int AREA_BREAKDOWN  = -2
+var int AREA_NEUTRAL    =  0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Mode ─────────────────────────────────────────────────────────────────────
+grpMode = "Mode"
+inCandleMode  = input.string("Heikin Ashi", "Candle Mode",
+                              options = ["Heikin Ashi", "Classic", "Both"], group = grpMode)
+inAreaEnable  = input.bool(true,  "Enable Area Overlay",  group = grpMode)
+inBarcEnable  = input.bool(true,  "Enable Bar Colour",    group = grpMode)
+
+// ── Ratio Thresholds ─────────────────────────────────────────────────────────
+grpRatio = "Ratio Thresholds"
+inBodyStrong  = input.float(0.65, "Strong Body ≥",     group = grpRatio, step = 0.05, minval = 0.3, maxval = 1.0)
+inBodyWeak    = input.float(0.30, "Weak Body ≤",       group = grpRatio, step = 0.05, minval = 0.0, maxval = 0.6)
+inWickLong    = input.float(0.35, "Long Wick ≥",       group = grpRatio, step = 0.05, minval = 0.1, maxval = 0.7)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColBodyBull     = input.color(color.rgb(0,   230, 150),  "Body Bull Strong",   group = grpCol)
+inColBodyBullWeak = input.color(color.rgb(100, 200, 160),  "Body Bull Weak",     group = grpCol)
+inColBodyBear     = input.color(color.rgb(255, 80,  80),   "Body Bear Strong",   group = grpCol)
+inColBodyBearWeak = input.color(color.rgb(200, 130, 130),  "Body Bear Weak",     group = grpCol)
+inColBodyDoji     = input.color(color.rgb(160, 160, 220),  "Doji / Indecision",  group = grpCol)
+inColWickBull     = input.color(color.rgb(80,  255, 180),  "Wick Bull",          group = grpCol)
+inColWickBear     = input.color(color.rgb(255, 140, 100),  "Wick Bear",          group = grpCol)
+inColAreaBull     = input.color(color.rgb(0,   220, 120),  "Area Bull Fill",     group = grpCol)
+inColAreaBear     = input.color(color.rgb(255, 80,  100),  "Area Bear Fill",     group = grpCol)
+inAreaAlpha       = input.int(75, "Area Alpha", group = grpCol, minval = 40, maxval = 99)
+
+// ── Baseline ─────────────────────────────────────────────────────────────────
+grpBase = "Area Baseline"
+inBaseType    = input.string("EMA", "Baseline Type",
+                              options = ["EMA", "VWAP", "SMA", "HLC3 EMA"], group = grpBase)
+inBaseLen     = input.int(20, "Baseline Length", group = grpBase, minval = 2, maxval = 500)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  HEIKIN ASHI COMPUTATION
+// ════════════════════════════════════════════════════════════════════════════
+var float haOpen  = na
+var float haClose = na
+
+haClose := (open + high + low + close) / 4.0
+haOpen  := na(haOpen[1]) ? (open + close) / 2.0 : (haOpen[1] + haClose[1]) / 2.0
+haHigh  = math.max(high, math.max(haOpen, haClose))
+haLow   = math.min(low,  math.min(haOpen, haClose))
+
+haRange = math.max(haHigh - haLow, syminfo.mintick)
+haBody  = math.abs(haClose - haOpen)
+haBodyR = haBody / haRange
+haUpW   = (haHigh - math.max(haOpen, haClose)) / haRange
+haDnW   = (math.min(haOpen, haClose) - haLow)  / haRange
+
+// ── HA character classification ───────────────────────────────────────────────
+haIsBull    = haClose >= haOpen
+haChar = haBodyR >= inBodyStrong and haIsBull  and haDnW < 0.05 ? HA_FULL_BULL  :
+         haBodyR >= inBodyStrong and not haIsBull and haUpW < 0.05 ? HA_FULL_BEAR  :
+         haBodyR <= inBodyWeak                                     ? HA_INDECISION :
+         haIsBull and haDnW >= inWickLong                          ? HA_PULL_UP    :
+         not haIsBull and haUpW >= inWickLong                      ? HA_PULL_DOWN  :
+         haIsBull ? 1 : -1
+
+// ── Ratio-based body colour ───────────────────────────────────────────────────
+fHABodyColor() =>
+    if haChar == HA_FULL_BULL
+        inColBodyBull
+    else if haChar == HA_FULL_BEAR
+        inColBodyBear
+    else if haChar == HA_INDECISION
+        inColBodyDoji
+    else if haChar == HA_PULL_UP or haChar == 1
+        color.new(inColBodyBullWeak, math.round((1.0 - haBodyR) * 60))
+    else
+        color.new(inColBodyBearWeak, math.round((1.0 - haBodyR) * 60))
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  CLASSIC CANDLE RATIO-BASED COLOUR
+// ════════════════════════════════════════════════════════════════════════════
+cRange = math.max(high - low, syminfo.mintick)
+cBody  = math.abs(close - open)
+cBodyR = cBody / cRange
+cUpW   = (high - math.max(open, close)) / cRange
+cDnW   = (math.min(open, close) - low)  / cRange
+cBull  = close >= open
+
+fCandleBodyColor() =>
+    if cBodyR >= inBodyStrong
+        cBull ? inColBodyBull : inColBodyBear
+    else if cBodyR <= inBodyWeak
+        inColBodyDoji
+    else
+        cBull ? color.new(inColBodyBullWeak, math.round((1.0 - cBodyR) * 50)) :
+                color.new(inColBodyBearWeak, math.round((1.0 - cBodyR) * 50))
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  AREA OVERLAY
+// ════════════════════════════════════════════════════════════════════════════
+baseline = inBaseType == "VWAP"    ? ta.vwap(hlc3) :
+           inBaseType == "SMA"     ? ta.sma(close, inBaseLen) :
+           inBaseType == "HLC3 EMA"? ta.ema(hlc3, inBaseLen) :
+           ta.ema(close, inBaseLen)
+
+areaVal = close - baseline
+
+// Area signal classification
+var float areaMax = na
+var float areaMin = na
+areaMax := na(areaMax) ? areaVal : math.max(areaMax, areaVal)
+areaMin := na(areaMin) ? areaVal : math.min(areaMin, areaVal)
+
+areaSignal = areaVal > 0 and areaVal > areaMax[1] ? AREA_BREAKOUT  :
+             areaVal < 0 and areaVal < areaMin[1] ? AREA_BREAKDOWN :
+             areaVal > 0                           ? AREA_FLOW_BULL :
+             areaVal < 0                           ? AREA_FLOW_BEAR :
+             AREA_NEUTRAL
+
+areaFill = color.new(areaVal >= 0 ? inColAreaBull : inColAreaBear, inAreaAlpha)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  BAR COLOUR APPLICATION
+// ════════════════════════════════════════════════════════════════════════════
+appliedColor = inCandleMode == "Heikin Ashi" ? fHABodyColor() :
+               inCandleMode == "Classic"     ? fCandleBodyColor() :
+               // "Both": blend HA influence into classic
+               color.new(fHABodyColor(), 30)
+
+barcolor(inBarcEnable ? appliedColor : na, title = "Candle Art Bar Colour")
+
+// ── HA candle plot (secondary series, always below main candles) ───────────────
+isHAMode = inCandleMode != "Classic"
+plotcandle(isHAMode ? haOpen : na,
+           isHAMode ? haHigh : na,
+           isHAMode ? haLow  : na,
+           isHAMode ? haClose: na,
+           title       = "HA Candles",
+           color       = color.new(fHABodyColor(), 50),
+           wickcolor   = haIsBull ? color.new(inColWickBull, 40) : color.new(inColWickBear, 40),
+           bordercolor = color.new(fHABodyColor(), 60))
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  AREA PLOT
+// ════════════════════════════════════════════════════════════════════════════
+pBaseline = plot(inAreaEnable ? baseline : na, title = "Baseline",
+                 color = color.new(color.gray, 55), linewidth = 1)
+pClose    = plot(inAreaEnable ? close    : na, title = "Close (area)",
+                 color = color.new(color.white, 80), linewidth = 1)
+fill(pClose, pBaseline, color = inAreaEnable ? areaFill : na, title = "Area Fill")
+
+// ── Breakout markers ──────────────────────────────────────────────────────────
+plotshape(inAreaEnable and areaSignal == AREA_BREAKOUT,
+          title = "Area Breakout", style = shape.square,
+          location = location.abovebar, color = color.new(inColAreaBull, 30), size = size.tiny)
+plotshape(inAreaEnable and areaSignal == AREA_BREAKDOWN,
+          title = "Area Breakdown", style = shape.square,
+          location = location.belowbar, color = color.new(inColAreaBear, 30), size = size.tiny)

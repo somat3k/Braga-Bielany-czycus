@@ -519,7 +519,7 @@ fUpdateRel(oldRel, hit) =>
 fRelFactor(rel) =>
     // maps reliability [0..1] to [minFactor..maxFactor]
     inRelMinWeightFactor + (inRelMaxWeightFactor - inRelMinWeightFactor) * rel
-// Syntax error at input "end of line without line continuation"(CE10156)
+
 fRelSummary() =>
     "T:" + str.tostring(relTrend, "#.##") + " M:" + str.tostring(relMomentum, "#.##") + " S:" + str.tostring(relSmc, "#.##")
 
@@ -1830,20 +1830,25 @@ fDrawSignal() =>
     width = stConfidence > 0.75 ? inDrawSigWidthHigh : stConfidence > 0.55 ? inDrawSigWidthMed : inDrawSigWidthLow
     style = fLineStyle(inDrawSigStyle)
 
-    y2 = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * 0.5 : stSignal == SIG_SHORT ? close - ta.atr(inAtrLen) * 0.5 : close
-    ln = line.new(bar_index, close, bar_index + 1, y2, xloc=xloc.bar_index, extend=extend.none, color=color.new(col, alpha), width=width, style=style)
+    // Signal direction arrow: angled line spanning lookahead bars so it is clearly visible
+    atrNow = ta.atr(inAtrLen)
+    sigReach = inWedgeLookAhead
+    y2 = stSignal == SIG_LONG ? close + atrNow * 1.5 : stSignal == SIG_SHORT ? close - atrNow * 1.5 : close
+    ln = line.new(bar_index, close, bar_index + sigReach, y2, xloc=xloc.bar_index, extend=extend.none, color=color.new(col, alpha), width=width, style=style)
     array.unshift(gLines, ln)
 
+    lbStyle = stSignal == SIG_LONG ? label.style_label_up : stSignal == SIG_SHORT ? label.style_label_down : label.style_label_center
+    lbY     = stSignal == SIG_LONG ? low - atrNow * 0.3 : stSignal == SIG_SHORT ? high + atrNow * 0.3 : close
     txt = stSignal == SIG_LONG ? "▲ LONG" : stSignal == SIG_SHORT ? "▼ SHORT" : "• WAIT"
-    lb = label.new(bar_index, close, txt + "\n" + stTag, textcolor=col, color=color.new(color.black, 100), style=label.style_label_center, size=size.tiny)
+    lb = label.new(bar_index, lbY, txt + "\n" + stTag, textcolor=col, color=color.new(color.black, 80), style=lbStyle, size=size.tiny)
     array.unshift(gLabels, lb)
 
-    // ATR risk guides only for active signals
+    // ATR risk guides only for active signals — extend across lookahead window
     if stSignal != SIG_WAIT
-        stopPx = stSignal == SIG_LONG ? close - ta.atr(inAtrLen) * inRiskStopATR : close + ta.atr(inAtrLen) * inRiskStopATR
-        takePx = stSignal == SIG_LONG ? close + ta.atr(inAtrLen) * inRiskTakeATR : close - ta.atr(inAtrLen) * inRiskTakeATR
-        lStop = line.new(bar_index, stopPx, bar_index + 1, stopPx, xloc=xloc.bar_index, color=color.new(inDrawStopCol, inDrawStopAlpha), style=fLineStyle(inDrawStopStyle), width=inDrawStopWidth)
-        lTake = line.new(bar_index, takePx, bar_index + 1, takePx, xloc=xloc.bar_index, color=color.new(inDrawTakeCol, inDrawStopAlpha), style=fLineStyle(inDrawStopStyle), width=inDrawStopWidth)
+        stopPx = stSignal == SIG_LONG ? close - atrNow * inRiskStopATR : close + atrNow * inRiskStopATR
+        takePx = stSignal == SIG_LONG ? close + atrNow * inRiskTakeATR : close - atrNow * inRiskTakeATR
+        lStop = line.new(bar_index, stopPx, bar_index + sigReach, stopPx, xloc=xloc.bar_index, color=color.new(inDrawStopCol, inDrawStopAlpha), style=fLineStyle(inDrawStopStyle), width=inDrawStopWidth)
+        lTake = line.new(bar_index, takePx, bar_index + sigReach, takePx, xloc=xloc.bar_index, color=color.new(inDrawTakeCol, inDrawStopAlpha), style=fLineStyle(inDrawStopStyle), width=inDrawStopWidth)
         array.unshift(gLines, lStop)
         array.unshift(gLines, lTake)
 
@@ -1890,7 +1895,6 @@ if isReady
     stMtfTrend := _stMtfTrend
     stMtfMomentum := _stMtfMomentum
 
-//Could not find function or function reference 'fComputeStructure'(CE10271)
     [_stLastPivotHigh, _stPrevPivotHigh, _stLastPivotLow, _stPrevPivotLow, _stStructureDir, _stBos, _stChoch, _stLiqSweep, _stObTouch, _stHtfBias] = fComputeStructure()
     stLastPivotHigh := _stLastPivotHigh
     stPrevPivotHigh := _stPrevPivotHigh
@@ -1966,8 +1970,6 @@ if isReady
     fPushString(arrPivot, fPivotEventSummary() + "|" + fPivotEventAgeSummary(), inTableRows)
     fPushString(arrRel, fRelSummary(), inTableRows)
     fPushFloat(arrConflict, stConflict, inTableRows)
-
-//Could not find function or function reference 'fPivotEventSummary'(CE10271)
 
     // 7) render
     fTableRender()

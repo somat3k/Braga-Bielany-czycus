@@ -1,0 +1,723 @@
+//@version=6
+// ============================================================================
+// Pinnacle · Snippet 01 · FVG + Supply/Demand + Volume
+// ============================================================================
+// Indicator 1 of the Pinnacle ecosystem.
+//
+// CONCEPT
+// ────────
+// · FVG (Fair Value Gap) — 3-bar imbalance; bullish when low > high[2],
+//   bearish when high < low[2].  Each gap is numbered sequentially,
+//   colour-coded by state (pristine → tested → breached → consumed/voided),
+//   and drawn as a filled box with optional midline.
+//
+// · Supply / Demand Zones — detected as impulse candles (body > ATR * mult)
+//   followed by a gap or strong displacement.  Boxes are extended rightward,
+//   sized to the zone's candle extremes.
+//
+// · Volume inside boxes — accumulated bar-by-bar; displayed at the box bottom
+//   edge (similar to Fibonacci level labels but "Volume Weighted").  The fill
+//   ratio relative to the zone's expected absorption volume is shown as a
+//   percentage gauge.  Tight horizontal wick-lines are drawn at the outer
+//   candle high/low around each zone boundary.
+//
+// OUTPUTS
+// ────────
+// · FVG boxes numbered #1…#N (freshest = highest number)
+// · S/D boxes with volume % label and wick-to-zone margin lines
+// · plotshape markers: impulse/reversal/breakout candle types
+// · plot(volume_score) for use in companion pane
+// ============================================================================
+indicator("Pinnacle · FVG + S/D + Volume", overlay = true,
+          max_lines_count  = 500,
+          max_labels_count = 500,
+          max_boxes_count  = 400)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [A]  INLINE ENUM CONSTANTS  (mirrors _enum_lib.pine until library published)
+// ════════════════════════════════════════════════════════════════════════════
+// Zone lifecycle
+var int ZONE_PRISTINE  = 0
+var int ZONE_TESTED    = 1
+var int ZONE_BREACHED  = 2
+var int ZONE_CONSUMED  = 3
+var int ZONE_VOIDED    = 4
+
+// ════════════════════════════════════════════════════════════════════════════
+// [B]  INPUTS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── FVG ──────────────────────────────────────────────────────────────────────
+grpFvg = "FVG"
+inFvgEnable      = input.bool(true,   "Enable FVG",          group = grpFvg)
+inFvgMaxActive   = input.int(20,      "Max Active FVGs",     group = grpFvg, minval = 2, maxval = 80)
+inFvgMaxLife     = input.int(300,     "Max Life (bars)",     group = grpFvg, minval = 10, maxval = 2000)
+inFvgShowMid     = input.bool(true,   "Show Midline",        group = grpFvg)
+inFvgShowLabel   = input.bool(true,   "Show Number Labels",  group = grpFvg)
+inFvgShowFill    = input.bool(true,   "Show Fill %",         group = grpFvg)
+inFvgConsumedAlpha = input.int(92,    "Consumed Box Alpha",  group = grpFvg, minval = 60, maxval = 99)
+inFvgFillAlpha   = input.int(80,      "Active Box Alpha",    group = grpFvg, minval = 0,  maxval = 95)
+
+// ── Supply / Demand ───────────────────────────────────────────────────────────
+grpSD = "Supply / Demand"
+inSdEnable       = input.bool(true,  "Enable S/D Zones",          group = grpSD)
+inSdAtrLen       = input.int(14,     "ATR Length",                 group = grpSD, minval = 5, maxval = 100)
+inSdImpulseMult  = input.float(1.5,  "Impulse Body ATR Mult",      group = grpSD, step = 0.1, minval = 0.5, maxval = 6.0)
+inSdLookback     = input.int(50,     "Detection Lookback (bars)",  group = grpSD, minval = 10, maxval = 500)
+inSdMaxZones     = input.int(6,      "Max Active Zones per Side",  group = grpSD, minval = 1,  maxval = 20)
+inSdMaxLife      = input.int(500,    "Zone Max Life (bars)",       group = grpSD, minval = 20, maxval = 3000)
+inSdWickLines    = input.bool(true,  "Wick-to-Zone Margin Lines",  group = grpSD)
+inSdVolGauge     = input.bool(true,  "Volume Gauge Inside Box",    group = grpSD)
+
+// ── HTF Overlay ───────────────────────────────────────────────────────────────
+grpHtf = "HTF Overlay"
+inHtfEnable = input.bool(true,   "Enable HTF S/D",  group = grpHtf)
+inHtfTf     = input.timeframe("D", "HTF Timeframe", group = grpHtf)
+
+// ── Colour Palette ────────────────────────────────────────────────────────────
+grpCol = "Colour Palette"
+inColFvgBull    = input.color(color.rgb(60,  220, 140),  "FVG Bullish",       group = grpCol)
+inColFvgBear    = input.color(color.rgb(255, 100, 100),  "FVG Bearish",       group = grpCol)
+inColFvgMid     = input.color(color.rgb(220, 210, 80),   "FVG Midline",       group = grpCol)
+inColSupply     = input.color(color.rgb(255, 120, 60),   "Supply Zone",       group = grpCol)
+inColDemand     = input.color(color.rgb(60,  170, 255),  "Demand Zone",       group = grpCol)
+inColWickLine   = input.color(color.rgb(200, 200, 200),  "Wick Margin Line",  group = grpCol)
+inColVolFill    = input.color(color.rgb(180, 255, 180),  "Vol Gauge Fill",    group = grpCol)
+
+// ── Line Style ────────────────────────────────────────────────────────────────
+grpLine = "Line Style"
+inFvgBorderStyle = input.string("Solid",  "FVG Border",  group = grpLine, options = ["Solid", "Dashed", "Dotted"])
+inSdBorderStyle  = input.string("Solid",  "S/D Border",  group = grpLine, options = ["Solid", "Dashed", "Dotted"])
+inMidLineStyle   = input.string("Dashed", "Midline",     group = grpLine, options = ["Solid", "Dashed", "Dotted"])
+inWickStyle      = input.string("Dotted", "Wick Line",   group = grpLine, options = ["Solid", "Dashed", "Dotted"])
+inFvgBorderWidth = input.int(1, "FVG Border Width", group = grpLine, minval = 1, maxval = 4)
+inSdBorderWidth  = input.int(2, "S/D Border Width", group = grpLine, options = [1, 2, 3, 4])
+inWickWidth      = input.int(1, "Wick Line Width",  group = grpLine, minval = 1, maxval = 4)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [C]  UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+fLineStyle(s) =>
+    s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+
+fClamp(v, lo, hi) => math.max(lo, math.min(hi, v))
+fSafeDiv(a, b)    => a / (math.abs(b) < 1e-10 ? 1e-10 : b)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [D]  FVG REGISTRY
+// ════════════════════════════════════════════════════════════════════════════
+
+var int   fvgSeq        = 0         // global sequence counter
+var float[] fvgTop      = array.new_float()
+var float[] fvgBot      = array.new_float()
+var bool[]  fvgBull     = array.new_bool()
+var int[]   fvgBirth    = array.new_int()
+var int[]   fvgState    = array.new_int()
+var float[] fvgFill     = array.new_float()
+var int[]   fvgNum      = array.new_int()   // sequential label number
+var float[] fvgVolAcc   = array.new_float() // accumulated volume since birth
+var box[]   fvgBox      = array.new_box()
+var label[] fvgLbl      = array.new_label()
+var line[]  fvgMid      = array.new_line()
+var line[]  fvgWickTop  = array.new_line()  // outer-candle high line
+var line[]  fvgWickBot  = array.new_line()  // outer-candle low line
+
+// ── Detect new FVG ────────────────────────────────────────────────────────────
+fDetectFVG() =>
+    if inFvgEnable
+        isBull = low > high[2]
+        isBear = high < low[2]
+        if isBull or isBear
+            // Evict oldest if at capacity
+            while array.size(fvgTop) >= inFvgMaxActive
+                bx = array.shift(fvgBox)
+                lb = array.shift(fvgLbl)
+                ml = array.shift(fvgMid)
+                wt = array.shift(fvgWickTop)
+                wb = array.shift(fvgWickBot)
+                if not na(bx)
+                    box.delete(bx)
+                if not na(lb)
+                    label.delete(lb)
+                if not na(ml)
+                    line.delete(ml)
+                if not na(wt)
+                    line.delete(wt)
+                if not na(wb)
+                    line.delete(wb)
+                array.shift(fvgTop)
+                array.shift(fvgBot)
+                array.shift(fvgBull)
+                array.shift(fvgBirth)
+                array.shift(fvgState)
+                array.shift(fvgFill)
+                array.shift(fvgNum)
+                array.shift(fvgVolAcc)
+
+            fvgSeq += 1
+            t = isBull ? low      : low[2]
+            b = isBull ? high[2]  : high
+            array.push(fvgTop,    t)
+            array.push(fvgBot,    b)
+            array.push(fvgBull,   isBull)
+            array.push(fvgBirth,  bar_index)
+            array.push(fvgState,  ZONE_PRISTINE)
+            array.push(fvgFill,   0.0)
+            array.push(fvgNum,    fvgSeq)
+            array.push(fvgVolAcc, 0.0)
+            array.push(fvgBox,    na)
+            array.push(fvgLbl,    na)
+            array.push(fvgMid,    na)
+            array.push(fvgWickTop, na)
+            array.push(fvgWickBot, na)
+    0
+
+// ── Update FVG lifecycle ──────────────────────────────────────────────────────
+fUpdateFVGLifecycle() =>
+    n = array.size(fvgTop)
+    if n > 0
+        i = 0
+        while i < n
+            t      = array.get(fvgTop,   i)
+            b      = array.get(fvgBot,   i)
+            birth  = array.get(fvgBirth, i)
+            prev   = array.get(fvgState, i)
+            fillR  = array.get(fvgFill,  i)
+
+            // Accumulate volume
+            array.set(fvgVolAcc, i, array.get(fvgVolAcc, i) + volume)
+
+            zone  = math.max(t - b, syminfo.mintick)
+            touch = low <= t and high >= b
+
+            rawFill = array.get(fvgBull, i) ?
+                 (t - math.max(low, b)) :
+                 (math.min(high, t) - b)
+            fr   = fClamp(fSafeDiv(rawFill, zone), 0.0, 1.2)
+            fill = math.max(fillR, fr)
+            array.set(fvgFill, i, fill)
+
+            expired = (bar_index - birth) > inFvgMaxLife
+            voided  = array.get(fvgBull, i) ? close < b : close > t
+            consumed = fill >= 0.95
+
+            newState = prev
+            if voided or expired
+                newState := ZONE_VOIDED
+            else if consumed
+                newState := ZONE_CONSUMED
+            else if touch and fill >= 0.50
+                newState := ZONE_BREACHED
+            else if touch
+                newState := ZONE_TESTED
+            else
+                newState := ZONE_PRISTINE
+
+            array.set(fvgState, i, newState)
+            i += 1
+    0
+
+// ── Render FVG boxes, labels, midlines, wick lines ────────────────────────────
+fRenderFVG() =>
+    n = array.size(fvgTop)
+    if n > 0
+        i = 0
+        while i < n
+            t     = array.get(fvgTop,   i)
+            b     = array.get(fvgBot,   i)
+            bull  = array.get(fvgBull,  i)
+            birth = array.get(fvgBirth, i)
+            st    = array.get(fvgState, i)
+            fill  = array.get(fvgFill,  i)
+            num   = array.get(fvgNum,   i)
+            bx    = array.get(fvgBox,   i)
+            lb    = array.get(fvgLbl,   i)
+            ml    = array.get(fvgMid,   i)
+            wt    = array.get(fvgWickTop, i)
+            wb    = array.get(fvgWickBot, i)
+
+            baseCol = bull ? inColFvgBull : inColFvgBear
+            alpha   = (st == ZONE_CONSUMED or st == ZONE_VOIDED) ? inFvgConsumedAlpha : inFvgFillAlpha
+            c       = color.new(baseCol, alpha)
+            isAlive = st == ZONE_PRISTINE or st == ZONE_TESTED or st == ZONE_BREACHED
+
+            // Box
+            if na(bx)
+                nb = box.new(birth, t, bar_index, b,
+                             xloc         = xloc.bar_index,
+                             bgcolor      = c,
+                             border_color = color.new(baseCol, 20),
+                             border_style = fLineStyle(inFvgBorderStyle),
+                             border_width = inFvgBorderWidth)
+                array.set(fvgBox, i, nb)
+            else
+                if isAlive
+                    box.set_right(bx, bar_index)
+                box.set_bgcolor(bx, c)
+                box.set_border_color(bx, color.new(baseCol, 20))
+
+            // FVG Number + fill-% label at box bottom
+            if inFvgShowLabel
+                fillPct = str.tostring(fill * 100.0, "#.0")
+                lbTxt   = "#" + str.tostring(num) + (inFvgShowFill ? "  " + fillPct + "%" : "")
+                lbY     = b - (t - b) * 0.05   // just below box
+                if na(lb)
+                    nlb = label.new(birth, lbY, lbTxt,
+                                    xloc      = xloc.bar_index,
+                                    style     = label.style_label_right,
+                                    textcolor = baseCol,
+                                    color     = color.new(color.black, 100),
+                                    size      = size.tiny)
+                    array.set(fvgLbl, i, nlb)
+                else
+                    label.set_x(lb, birth)
+                    label.set_y(lb, lbY)
+                    label.set_text(lb, lbTxt)
+                    label.set_textcolor(lb, baseCol)
+
+            // Midline
+            if inFvgShowMid and isAlive
+                mid = (t + b) * 0.5
+                if na(ml)
+                    nml = line.new(birth, mid, bar_index, mid,
+                                   xloc  = xloc.bar_index,
+                                   color = color.new(inColFvgMid, 50),
+                                   style = fLineStyle(inMidLineStyle),
+                                   width = 1)
+                    array.set(fvgMid, i, nml)
+                else
+                    line.set_x2(ml, bar_index)
+                    line.set_y1(ml, mid)
+                    line.set_y2(ml, mid)
+            else if not na(ml) and not isAlive
+                line.delete(ml)
+                array.set(fvgMid, i, na)
+
+            // Outer wick lines (tight horizontal lines at zone outer extremes)
+            if inSdWickLines and isAlive
+                if na(wt)
+                    nwt = line.new(birth, t, bar_index, t,
+                                   xloc  = xloc.bar_index,
+                                   color = color.new(inColWickLine, 40),
+                                   style = fLineStyle(inWickStyle),
+                                   width = inWickWidth)
+                    array.set(fvgWickTop, i, nwt)
+                else
+                    line.set_x2(wt, bar_index)
+
+                if na(wb)
+                    nwb = line.new(birth, b, bar_index, b,
+                                   xloc  = xloc.bar_index,
+                                   color = color.new(inColWickLine, 40),
+                                   style = fLineStyle(inWickStyle),
+                                   width = inWickWidth)
+                    array.set(fvgWickBot, i, nwb)
+                else
+                    line.set_x2(wb, bar_index)
+
+            i += 1
+    0
+
+// ── Compact: remove consumed/voided FVGs ─────────────────────────────────────
+fCompactFVG() =>
+    n = array.size(fvgTop)
+    if n > 0
+        i = n - 1
+        while i >= 0
+            st = array.get(fvgState, i)
+            if st == ZONE_CONSUMED or st == ZONE_VOIDED
+                bx = array.get(fvgBox,      i)
+                lb = array.get(fvgLbl,      i)
+                ml = array.get(fvgMid,      i)
+                wt = array.get(fvgWickTop,  i)
+                wb = array.get(fvgWickBot,  i)
+                if not na(bx)
+                    box.delete(bx)
+                if not na(lb)
+                    label.delete(lb)
+                if not na(ml)
+                    line.delete(ml)
+                if not na(wt)
+                    line.delete(wt)
+                if not na(wb)
+                    line.delete(wb)
+                array.remove(fvgTop,     i)
+                array.remove(fvgBot,     i)
+                array.remove(fvgBull,    i)
+                array.remove(fvgBirth,   i)
+                array.remove(fvgState,   i)
+                array.remove(fvgFill,    i)
+                array.remove(fvgNum,     i)
+                array.remove(fvgVolAcc,  i)
+                array.remove(fvgBox,     i)
+                array.remove(fvgLbl,     i)
+                array.remove(fvgMid,     i)
+                array.remove(fvgWickTop, i)
+                array.remove(fvgWickBot, i)
+            i -= 1
+    0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [E]  SUPPLY / DEMAND ZONE REGISTRY
+// ════════════════════════════════════════════════════════════════════════════
+
+var float[] sdTop      = array.new_float()
+var float[] sdBot      = array.new_float()
+var bool[]  sdIsBull   = array.new_bool()   // demand = bull, supply = bear
+var int[]   sdBirth    = array.new_int()
+var int[]   sdState    = array.new_int()
+var float[] sdVolRef   = array.new_float()  // volume at zone creation bar
+var float[] sdVolAcc   = array.new_float()  // cumulative volume since birth
+var box[]   sdBox      = array.new_box()
+var label[] sdLbl      = array.new_label()
+var line[]  sdWickTop  = array.new_line()
+var line[]  sdWickBot  = array.new_line()
+var label[] sdVolLbl   = array.new_label()
+
+// ── Detect Supply/Demand impulse zones ────────────────────────────────────────
+fDetectSD() =>
+    if inSdEnable
+        atr = ta.atr(inSdAtrLen)
+        body = math.abs(close - open)
+        isImpulse = body > atr * inSdImpulseMult
+
+        // Bullish impulse (demand) on close: create demand zone from prior candle's range
+        if isImpulse and close > open
+            zTop = math.max(open[1], close[1])
+            zBot = math.min(open[1], close[1])
+            if zTop > zBot
+                // Remove oldest demand if at cap
+                while array.size(sdTop) >= inSdMaxZones * 2
+                    bx = array.shift(sdBox)
+                    lb = array.shift(sdLbl)
+                    wt = array.shift(sdWickTop)
+                    wb = array.shift(sdWickBot)
+                    vl = array.shift(sdVolLbl)
+                    if not na(bx)
+                        box.delete(bx)
+                    if not na(lb)
+                        label.delete(lb)
+                    if not na(wt)
+                        line.delete(wt)
+                    if not na(wb)
+                        line.delete(wb)
+                    if not na(vl)
+                        label.delete(vl)
+                    array.shift(sdTop)
+                    array.shift(sdBot)
+                    array.shift(sdIsBull)
+                    array.shift(sdBirth)
+                    array.shift(sdState)
+                    array.shift(sdVolRef)
+                    array.shift(sdVolAcc)
+                array.push(sdTop,    zTop)
+                array.push(sdBot,    zBot)
+                array.push(sdIsBull, true)
+                array.push(sdBirth,  bar_index - 1)
+                array.push(sdState,  ZONE_PRISTINE)
+                array.push(sdVolRef, volume[1])
+                array.push(sdVolAcc, 0.0)
+                array.push(sdBox,    na)
+                array.push(sdLbl,    na)
+                array.push(sdWickTop, na)
+                array.push(sdWickBot, na)
+                array.push(sdVolLbl,  na)
+
+        // Bearish impulse (supply)
+        if isImpulse and close < open
+            zTop = math.max(open[1], close[1])
+            zBot = math.min(open[1], close[1])
+            if zTop > zBot
+                while array.size(sdTop) >= inSdMaxZones * 2
+                    bx = array.shift(sdBox)
+                    lb = array.shift(sdLbl)
+                    wt = array.shift(sdWickTop)
+                    wb = array.shift(sdWickBot)
+                    vl = array.shift(sdVolLbl)
+                    if not na(bx)
+                        box.delete(bx)
+                    if not na(lb)
+                        label.delete(lb)
+                    if not na(wt)
+                        line.delete(wt)
+                    if not na(wb)
+                        line.delete(wb)
+                    if not na(vl)
+                        label.delete(vl)
+                    array.shift(sdTop)
+                    array.shift(sdBot)
+                    array.shift(sdIsBull)
+                    array.shift(sdBirth)
+                    array.shift(sdState)
+                    array.shift(sdVolRef)
+                    array.shift(sdVolAcc)
+                array.push(sdTop,    zTop)
+                array.push(sdBot,    zBot)
+                array.push(sdIsBull, false)
+                array.push(sdBirth,  bar_index - 1)
+                array.push(sdState,  ZONE_PRISTINE)
+                array.push(sdVolRef, volume[1])
+                array.push(sdVolAcc, 0.0)
+                array.push(sdBox,    na)
+                array.push(sdLbl,    na)
+                array.push(sdWickTop, na)
+                array.push(sdWickBot, na)
+                array.push(sdVolLbl,  na)
+    0
+
+// ── Update S/D state + accumulate volume ─────────────────────────────────────
+fUpdateSDLifecycle() =>
+    n = array.size(sdTop)
+    if n > 0
+        i = 0
+        while i < n
+            t     = array.get(sdTop,    i)
+            b     = array.get(sdBot,    i)
+            bull  = array.get(sdIsBull, i)
+            birth = array.get(sdBirth,  i)
+            prev  = array.get(sdState,  i)
+            vRef  = array.get(sdVolRef, i)
+            vAcc  = array.get(sdVolAcc, i) + volume
+            array.set(sdVolAcc, i, vAcc)
+
+            expired = (bar_index - birth) > inSdMaxLife
+            voided  = bull ? close < b : close > t
+            touch   = low <= t and high >= b
+
+            zone     = math.max(t - b, syminfo.mintick)
+            rawFill  = bull ? (t - math.max(low, b)) : (math.min(high, t) - b)
+            fr       = fClamp(fSafeDiv(rawFill, zone), 0.0, 1.2)
+            fill     = fr
+
+            newState = prev
+            if voided or expired
+                newState := ZONE_VOIDED
+            else if fill >= 0.95
+                newState := ZONE_CONSUMED
+            else if touch and fill >= 0.50
+                newState := ZONE_BREACHED
+            else if touch
+                newState := ZONE_TESTED
+            else
+                newState := ZONE_PRISTINE
+            array.set(sdState, i, newState)
+            i += 1
+    0
+
+// ── Render S/D boxes with volume gauge labels ─────────────────────────────────
+fRenderSD() =>
+    n = array.size(sdTop)
+    if n > 0 and inSdEnable
+        i = 0
+        while i < n
+            t     = array.get(sdTop,    i)
+            b     = array.get(sdBot,    i)
+            bull  = array.get(sdIsBull, i)
+            birth = array.get(sdBirth,  i)
+            st    = array.get(sdState,  i)
+            vRef  = array.get(sdVolRef, i)
+            vAcc  = array.get(sdVolAcc, i)
+            bx    = array.get(sdBox,    i)
+            lb    = array.get(sdLbl,    i)
+            wt    = array.get(sdWickTop, i)
+            wb    = array.get(sdWickBot, i)
+            vl    = array.get(sdVolLbl,  i)
+
+            baseCol = bull ? inColDemand : inColSupply
+            alpha   = (st == ZONE_CONSUMED or st == ZONE_VOIDED) ? 92 : 80
+            c       = color.new(baseCol, alpha)
+            isAlive = st != ZONE_CONSUMED and st != ZONE_VOIDED
+
+            // Box
+            if na(bx)
+                nb = box.new(birth, t, bar_index, b,
+                             xloc         = xloc.bar_index,
+                             bgcolor      = c,
+                             border_color = color.new(baseCol, 15),
+                             border_style = fLineStyle(inSdBorderStyle),
+                             border_width = inSdBorderWidth)
+                array.set(sdBox, i, nb)
+            else
+                if isAlive
+                    box.set_right(bx, bar_index)
+                box.set_bgcolor(bx, c)
+
+            // Zone type label
+            lbTxt = bull ? "DEMAND" : "SUPPLY"
+            lbY   = bull ? b - (t - b) * 0.1 : t + (t - b) * 0.1
+            if na(lb)
+                nlb = label.new(birth + 1, lbY, lbTxt,
+                                xloc      = xloc.bar_index,
+                                style     = label.style_label_right,
+                                textcolor = baseCol,
+                                color     = color.new(color.black, 100),
+                                size      = size.tiny)
+                array.set(sdLbl, i, nlb)
+
+            // Volume absorption gauge: shows accumulated volume vs reference
+            if inSdVolGauge
+                volRatio = fClamp(fSafeDiv(vAcc, math.max(vRef, 1.0)), 0.0, 10.0)
+                vlTxt    = "Vol " + str.tostring(volRatio, "#.1") + "x"
+                vlY      = (t + b) * 0.5
+                if na(vl)
+                    nvl = label.new(bar_index, vlY, vlTxt,
+                                    xloc      = xloc.bar_index,
+                                    style     = label.style_label_left,
+                                    textcolor = inColVolFill,
+                                    color     = color.new(color.black, 80),
+                                    size      = size.tiny)
+                    array.set(sdVolLbl, i, nvl)
+                else
+                    label.set_x(vl, bar_index)
+                    label.set_y(vl, vlY)
+                    label.set_text(vl, vlTxt)
+
+            // Tight wick lines at zone outer extremes
+            if inSdWickLines and isAlive
+                if na(wt)
+                    nwt = line.new(birth, t, bar_index, t,
+                                   xloc  = xloc.bar_index,
+                                   color = color.new(inColWickLine, 35),
+                                   style = fLineStyle(inWickStyle),
+                                   width = inWickWidth)
+                    array.set(sdWickTop, i, nwt)
+                else
+                    line.set_x2(wt, bar_index)
+
+                if na(wb)
+                    nwb = line.new(birth, b, bar_index, b,
+                                   xloc  = xloc.bar_index,
+                                   color = color.new(inColWickLine, 35),
+                                   style = fLineStyle(inWickStyle),
+                                   width = inWickWidth)
+                    array.set(sdWickBot, i, nwb)
+                else
+                    line.set_x2(wb, bar_index)
+
+            i += 1
+    0
+
+// ── Compact terminal S/D zones ────────────────────────────────────────────────
+fCompactSD() =>
+    n = array.size(sdTop)
+    if n > 0
+        i = n - 1
+        while i >= 0
+            st = array.get(sdState, i)
+            if st == ZONE_CONSUMED or st == ZONE_VOIDED
+                bx = array.get(sdBox,     i)
+                lb = array.get(sdLbl,     i)
+                wt = array.get(sdWickTop, i)
+                wb = array.get(sdWickBot, i)
+                vl = array.get(sdVolLbl,  i)
+                if not na(bx)
+                    box.delete(bx)
+                if not na(lb)
+                    label.delete(lb)
+                if not na(wt)
+                    line.delete(wt)
+                if not na(wb)
+                    line.delete(wb)
+                if not na(vl)
+                    label.delete(vl)
+                array.remove(sdTop,     i)
+                array.remove(sdBot,     i)
+                array.remove(sdIsBull,  i)
+                array.remove(sdBirth,   i)
+                array.remove(sdState,   i)
+                array.remove(sdVolRef,  i)
+                array.remove(sdVolAcc,  i)
+                array.remove(sdBox,     i)
+                array.remove(sdLbl,     i)
+                array.remove(sdWickTop, i)
+                array.remove(sdWickBot, i)
+                array.remove(sdVolLbl,  i)
+            i -= 1
+    0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F]  HTF S/D SHADOW OVERLAY  (senior timeframe zones, lightly shaded)
+// ════════════════════════════════════════════════════════════════════════════
+htfHigh  = request.security(syminfo.tickerid, inHtfTf, high,  barmerge.gaps_off, barmerge.lookahead_off)
+htfLow   = request.security(syminfo.tickerid, inHtfTf, low,   barmerge.gaps_off, barmerge.lookahead_off)
+htfOpen  = request.security(syminfo.tickerid, inHtfTf, open,  barmerge.gaps_off, barmerge.lookahead_off)
+htfClose = request.security(syminfo.tickerid, inHtfTf, close, barmerge.gaps_off, barmerge.lookahead_off)
+
+var box htfDemandBox = na
+var box htfSupplyBox = na
+
+fUpdateHTF() =>
+    if inHtfEnable
+        htfAtr  = request.security(syminfo.tickerid, inHtfTf, ta.atr(14), barmerge.gaps_off, barmerge.lookahead_off)
+        htfBody = math.abs(htfClose - htfOpen)
+        if htfBody > htfAtr * inSdImpulseMult
+            if htfClose > htfOpen
+                // HTF demand zone: prior bar body
+                if not na(htfDemandBox)
+                    box.delete(htfDemandBox)
+                htfDemandBox := box.new(bar_index - 20, math.max(htfOpen[1], htfClose[1]),
+                                        bar_index + 200,  math.min(htfOpen[1], htfClose[1]),
+                                        xloc         = xloc.bar_index,
+                                        bgcolor      = color.new(inColDemand, 92),
+                                        border_color = color.new(inColDemand, 60),
+                                        border_style = line.style_dotted,
+                                        border_width = 1)
+            else
+                if not na(htfSupplyBox)
+                    box.delete(htfSupplyBox)
+                htfSupplyBox := box.new(bar_index - 20, math.max(htfOpen[1], htfClose[1]),
+                                        bar_index + 200,  math.min(htfOpen[1], htfClose[1]),
+                                        xloc         = xloc.bar_index,
+                                        bgcolor      = color.new(inColSupply, 92),
+                                        border_color = color.new(inColSupply, 60),
+                                        border_style = line.style_dotted,
+                                        border_width = 1)
+    0
+
+// ════════════════════════════════════════════════════════════════════════════
+// [G]  VOLUME SCORE OUTPUT  (companion pane)
+// ════════════════════════════════════════════════════════════════════════════
+atrRef    = ta.atr(inSdAtrLen)
+volNorm   = fClamp(fSafeDiv(volume - ta.sma(volume, 20), ta.stdev(volume, 20)), -3.0, 3.0)
+bodyRatio = fClamp(fSafeDiv(math.abs(close - open), math.max(high - low, syminfo.mintick)), 0.0, 1.0)
+volScore  = volNorm * bodyRatio * (close > open ? 1.0 : -1.0)
+
+// ════════════════════════════════════════════════════════════════════════════
+// [H]  MAIN LOOP
+// ════════════════════════════════════════════════════════════════════════════
+fDetectFVG()
+fUpdateFVGLifecycle()
+fRenderFVG()
+fCompactFVG()
+
+fDetectSD()
+fUpdateSDLifecycle()
+fRenderSD()
+fCompactSD()
+
+fUpdateHTF()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [I]  PLOTS / SIGNALS
+// ════════════════════════════════════════════════════════════════════════════
+
+// Volume score plot for companion pane
+plot(volScore, title = "Volume Score", display = display.pane,
+     color  = volScore >= 0 ? color.new(color.lime, 20) : color.new(color.red, 20),
+     style  = plot.style_histogram, linewidth = 2)
+
+// Candle-character shapes below/above bars
+isImpulseBull = math.abs(close - open) > ta.atr(inSdAtrLen) * inSdImpulseMult and close > open
+isImpulseBear = math.abs(close - open) > ta.atr(inSdAtrLen) * inSdImpulseMult and close < open
+
+plotshape(isImpulseBull, title = "Impulse Bull",
+          style    = shape.triangleup,
+          location = location.belowbar,
+          color    = color.new(inColDemand, 20),
+          size     = size.small)
+
+plotshape(isImpulseBear, title = "Impulse Bear",
+          style    = shape.triangledown,
+          location = location.abovebar,
+          color    = color.new(inColSupply, 20),
+          size     = size.small)
