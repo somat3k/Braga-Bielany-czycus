@@ -281,16 +281,18 @@ fUpdateGann() =>
                               color = color.new(inColGann, 60),
                               style = fLineStyle(inGannStyle), width = 1)
                 array.push(gannLines, lt)
-            // Gann Fan lines: 1x1, 2x1, 4x1 and inverses from swing low
+            // Gann Fan lines: 1x1, 2x1, 4x1 and inverses from swing origin
             if inGannFanEnable
-                swingX = lBar < hBar ? lBar : hBar
-                swingY = lBar < hBar ? lPx  : hPx
-                timeUnit = math.max(math.abs(hBar - lBar), 1)
+                isUp      = lBar < hBar
+                swingX    = isUp ? lBar : hBar
+                swingY    = isUp ? lPx  : hPx
+                timeUnit  = math.max(math.abs(hBar - lBar), 1)
                 priceUnit = rng
                 fanAngles = array.from(1.0, 0.5, 0.25, 2.0, 4.0)
                 for a = 0 to array.size(fanAngles) - 1
-                    ang = array.get(fanAngles, a)
-                    yEnd = swingY + priceUnit * ang * (x2 - swingX) / timeUnit
+                    ang  = array.get(fanAngles, a)
+                    yEnd = isUp ? swingY + priceUnit * ang * (x2 - swingX) / timeUnit
+                                : swingY - priceUnit * ang * (x2 - swingX) / timeUnit
                     lf = line.new(swingX, swingY, x2, yEnd,
                                   xloc = xloc.bar_index,
                                   color = color.new(inColGannFan, 65),
@@ -299,6 +301,54 @@ fUpdateGann() =>
     0
 
 fUpdateGann()
+
+// ════════════════════════════════════════════════════════════════════════════
+// [F2]  FIBONACCI CIRCLES (box approximation)
+// ════════════════════════════════════════════════════════════════════════════
+// Draws square boxes whose half-height equals each Fibonacci radius in price
+// and whose half-width is derived from the price-per-bar ATR ratio so the
+// box is visually close to a circle on the chart.
+// Radii: 0.618, 1.0, 1.618 × swing range, centred on the swing endpoint.
+// ════════════════════════════════════════════════════════════════════════════
+var box[] circleBoxes = array.new_box()
+
+fClearCircles() =>
+    while array.size(circleBoxes) > 0
+        box.delete(array.pop(circleBoxes))
+    0
+
+var int circleKey = na
+
+fUpdateCircles() =>
+    if inEnCircle and array.size(pivHBar) > 0 and array.size(pivLBar) > 0
+        hBar = array.get(pivHBar,   0)
+        hPx  = array.get(pivHPrice, 0)
+        lBar = array.get(pivLBar,   0)
+        lPx  = array.get(pivLPrice, 0)
+        kk   = math.min(hBar, lBar)
+        if circleKey != kk
+            circleKey := kk
+            fClearCircles()
+            isUp    = lBar < hBar
+            cBar    = isUp ? hBar : lBar   // centre at the swing endpoint
+            cPx     = isUp ? hPx  : lPx
+            rng     = math.max(math.abs(hPx - lPx), syminfo.mintick)
+            safeAtr = math.max(ta.atr(14), syminfo.mintick)
+            fibRadii = array.from(0.618, 1.0, 1.618)
+            for i = 0 to array.size(fibRadii) - 1
+                r      = array.get(fibRadii, i)
+                rPrice = rng * r
+                // aspect-ratio correction: convert price radius to bar radius
+                rBars  = math.max(1, int(rPrice / safeAtr))
+                bx = box.new(cBar - rBars, cPx + rPrice, cBar + rBars, cPx - rPrice,
+                             xloc = xloc.bar_index,
+                             bgcolor      = color.new(inColFib, 92),
+                             border_color = color.new(inColFib, 45),
+                             border_width = 1)
+                array.push(circleBoxes, bx)
+    0
+
+fUpdateCircles()
 
 // ════════════════════════════════════════════════════════════════════════════
 // [G]  SPEED RESISTANCE LINES

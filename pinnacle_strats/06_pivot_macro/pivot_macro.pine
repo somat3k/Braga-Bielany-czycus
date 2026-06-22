@@ -177,7 +177,10 @@ if not na(ph) or not na(pl)
     pivBar = bar_index - inPivRight
     atrR   = fSafeDiv(math.abs(pivPx - (not na(ph) ? low[inPivRight] : high[inPivRight])), atr)
     volR   = fSafeDiv(volume[inPivRight], volAvg)
-    sessTxt = "—"
+    pivHour = hour[inPivRight]
+    sessTxt = (pivHour >= 13 and pivHour < 17) ? "LON/NY" :
+              (pivHour >= 8  and pivHour < 13) ? "LON"    :
+              (pivHour >= 17 and pivHour < 22) ? "NY"     : "ASIA"
 
     array.unshift(evtBar,   pivBar)
     array.unshift(evtPrice, pivPx)
