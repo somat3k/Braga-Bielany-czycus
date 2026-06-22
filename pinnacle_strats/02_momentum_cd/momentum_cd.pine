@@ -46,6 +46,9 @@ var int SMC_CHOCH_BULL =  2
 var int SMC_CHOCH_BEAR = -2
 var int SMC_NONE       =  0
 
+// Minimum absolute normalised value to count an oscillator as directional
+var float MOMENTUM_THRESHOLD = 0.15
+
 // ════════════════════════════════════════════════════════════════════════════
 // [B]  INPUTS
 // ════════════════════════════════════════════════════════════════════════════
@@ -199,12 +202,12 @@ finalScore = inHtfEnable ?
 // [E]  CONVERGENCE / DIVERGENCE STATE
 // ════════════════════════════════════════════════════════════════════════════
 // Count oscillators pointing in each direction (threshold ±0.15)
-bullCount = (nMacd > 0.15 ? 1 : 0) + (nRsi > 0.15 ? 1 : 0) + (nStoch > 0.15 ? 1 : 0) +
-            (nMfi  > 0.15 ? 1 : 0) + (nCci > 0.15 ? 1 : 0) + (nWillr > 0.15 ? 1 : 0) +
-            (nMom  > 0.15 ? 1 : 0) + (nRoc > 0.15 ? 1 : 0)
-bearCount = (nMacd < -0.15 ? 1 : 0) + (nRsi < -0.15 ? 1 : 0) + (nStoch < -0.15 ? 1 : 0) +
-            (nMfi  < -0.15 ? 1 : 0) + (nCci < -0.15 ? 1 : 0) + (nWillr < -0.15 ? 1 : 0) +
-            (nMom  < -0.15 ? 1 : 0) + (nRoc < -0.15 ? 1 : 0)
+bullCount = (nMacd > MOMENTUM_THRESHOLD ? 1 : 0) + (nRsi > MOMENTUM_THRESHOLD ? 1 : 0) + (nStoch > MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMfi  > MOMENTUM_THRESHOLD ? 1 : 0) + (nCci > MOMENTUM_THRESHOLD ? 1 : 0) + (nWillr > MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMom  > MOMENTUM_THRESHOLD ? 1 : 0) + (nRoc > MOMENTUM_THRESHOLD ? 1 : 0)
+bearCount = (nMacd < -MOMENTUM_THRESHOLD ? 1 : 0) + (nRsi < -MOMENTUM_THRESHOLD ? 1 : 0) + (nStoch < -MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMfi  < -MOMENTUM_THRESHOLD ? 1 : 0) + (nCci < -MOMENTUM_THRESHOLD ? 1 : 0) + (nWillr < -MOMENTUM_THRESHOLD ? 1 : 0) +
+            (nMom  < -MOMENTUM_THRESHOLD ? 1 : 0) + (nRoc < -MOMENTUM_THRESHOLD ? 1 : 0)
 
 convThreshold = math.max(activeCount - 2, 1)
 isBullConv = bullCount >= convThreshold

@@ -65,6 +65,10 @@ var int CANDLE_REVERSAL      = 10
 var int CANDLE_ACCELERATION  = 11
 var int CANDLE_MEAN_REV      = 12
 
+// Fibonacci projection ratios
+var float FIB_618  = 0.618
+var float FIB_1618 = 1.618
+
 var int SESSION_ASIAN   = 0
 var int SESSION_LONDON  = 1
 var int SESSION_NY      = 2
@@ -254,7 +258,7 @@ fUpdateWaveLabels() =>
                 b5Start = array.get(bars,   n - 1)
                 p5Start = array.get(prices, n - 1)
                 dir5    = array.get(types,  n - 1)
-                proj5   = p5Start + l1 * 0.618 * (dir5 > 0 ? 1.0 : -1.0)
+                proj5   = p5Start + l1 * FIB_618 * (dir5 > 0 ? 1.0 : -1.0)
                 lProj = line.new(b5Start, p5Start, b5Start + inWaveProjFar, proj5,
                                  xloc = xloc.bar_index,
                                  color = color.new(inColWave5, 30),
